@@ -51,3 +51,6 @@ def _convert_state_relative_map_to_csdl(input_state, linear_map, output_name):
     output_state = csdl.matmat(linear_map_csdl, input_state_csdl)
     relative_map.register_module_output(output_name, output_state)
     return relative_map
+
+# def convert_map_to_csdl(map, input_name, output_name):
+    # pass
