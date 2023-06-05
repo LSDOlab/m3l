@@ -1,26 +1,43 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, List
 
 import numpy as np
 import array_mapper as am
 # import scipy.sparse as sps
 import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
+from lsdo_modules.module.module import Module
 
 import re
 
 ''' Classes representing spaces '''
 @dataclass
 class Field:
+    '''
+    A class for representing mathematical fields such as the field of all real numbers.
+    '''
     pass    # This may potentially have more information in the future
 
 @dataclass
 class VectorSpace:
+    '''
+    A class for representing vector spaces.
+
+    Parameters
+    ----------
+    field : Field
+        The field that the vector space is defined over.
+    dimensions : tuple
+        The dimensions/shape of the vectors.
+    '''
     field : Field
     dimensions : tuple
 
 @dataclass
 class FunctionSpace:
+    '''
+    A class for representing function spaces.
+    '''
     # reference_geometry : Function = None
     pass    # do we want separate class for state functions that point to a reference geometry?
 
@@ -28,6 +45,20 @@ class FunctionSpace:
 ''' Classes functions and information '''
 @dataclass(kw_only=True)
 class Variable:
+    '''
+    A general M3L variable.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
+    '''
     name : str
     upstream_variables : dict = None
     map : csdl.Model = None
@@ -35,34 +66,91 @@ class Variable:
 
 @dataclass(kw_only=True)
 class Vector(Variable):
-    values : np.ndarray
-    # value : np.ndarray = values
+    '''
+    A general vector class.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
+    vector_space : VectorSpace
+        The vector space from which this vector is defined.
+    '''
+    vector_space : VectorSpace
 
     def __post_init__(self):
         self.value = self.values
 
 @dataclass(kw_only=True)
 class FunctionValues(Variable):
+    '''
+    A class for representing the evaluation of a function over a mesh.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
     mesh : am.MappedArray
-    values : np.ndarray = None
-    # value : np.ndarray = values
+        The mesh over which the function is evaluated.
+    '''
+    mesh : am.MappedArray
 
     def __post_init__(self):
-        self.value = self.values
+        self.values = self.value
 
 @dataclass(kw_only=True)
 class Function(Variable):
+    '''
+    A class for representing a general function.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
+    mesh : am.MappedArray
+        The mesh over which the function is evaluated.
+    '''
     function_space : FunctionSpace
-    # coefficients: int = field(default_factory=lambda: None, metadata={"orig_name": "original_attribute"})
     coefficients : np.ndarray = None
-    # value : np.ndarray = coefficients   # not sure I actually want this.
 
     def __call__(self, mesh) -> FunctionValues:
         return self.evaluate(mesh)
 
     def evaluate(self, mesh):
+        '''
+        Evaluate the function at a given set of nodal locations.
+
+        Parameters
+        ----------
+        mesh : am.MappedArray
+            The mesh to evaluate over.
+
+        Returns
+        -------
+        function_values : FunctionValues
+            A variable representing the evaluated function values.
+        '''
         num_values = np.prod(mesh.shape[:-1])
         temp_map = np.eye(num_values, self.function_space.num_coefficients)
+        temp_map[self.function_space.num_coefficients:,0] = np.ones((num_values-self.function_space.num_coefficients,))
         output_name = f'nodal_{self.name}'
 
         # csdl_map = csdl.Model()
@@ -81,6 +169,14 @@ class Function(Variable):
         return function_values
     
     def inverse_evaluate(self, function_values:FunctionValues):
+        '''
+        Performs an inverse evaluation to set the coefficients of this function given an input of evaluated points over a mesh.
+
+        Parameters
+        ----------
+        function_values : FunctionValues
+            A variable representing the evaluated function values.
+        '''
         # map = Perform B-spline fit and potentially some sort of conversion from extrinsic to intrinsic
 
         num_values = np.prod(function_values.mesh.shape[:-1])
@@ -99,129 +195,208 @@ class Function(Variable):
 
 
 ''' Classes for representing models '''
-class Model:    # Solvers should be an instance of this
+@dataclass
+class ModelIOModule:
+    '''
+    A parent class for representing modules that map variables in or out of a model.
 
-    # def __init__(self, model):
-    #     self.model = model
-    #     self.map_in = None
-    #     self.map_in_csdl = None
-    #     self.map_out = None
-    #     self.map_out_csdl = None
-    #     self.csdl_model = None
-    #     # attributes = vars(self.model)
-    #     # for attribute_name, attribute_value in attributes.items():
-    #     #     setattr(self, attribute_name, attribute_value)
+    Parameters
+    ----------
+    name : str
+        The name of the mapping.
+    map : {np.ndarray, sps.csc_matrix}
+        The map that maps the variable in or out of the solver.
+    '''
+    name : str
+    map : np.ndarray
 
-    def _assemble_csdl(self, input:Function, output_mesh:am.MappedArray=None):
-        model_csdl = self.model._assemble_csdl()
-        self.model.construct_map_in(input)
-        self.model.construct_map_out(output_mesh)
+@dataclass
+class ModelInputModule(ModelIOModule):
+    '''
+    A class for representing modules that map a variable into a model.
 
-        model_name_camel = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', type(model_csdl).__name__)
-        model_name_snake = re.sub('([a-z0-9])([A-Z])', r'\1_\2', model_name_camel).lower()
-        map_in_csdl = self.model.map_in_csdl
-        # if map_in_csdl is None:
-        #     pass
-        #     map_in_csdl = identity
-        map_out_csdl = self.model.map_out_csdl
-        # if map_in_csdl is None:
-        #     map_out_csdl = identity
+    Parameters
+    ----------
+    name : str
+        The name of the mapping.
+    map : {np.ndarray, sps.csc_matrix}
+        The map that maps the variable in or out of the solver.
+    module_input : FunctionValues
+        The input that will be mapped into the model.
+    model_input_name : str
+        The name of input as the model's csdl model is expecting.
+    '''
+    module_input : FunctionValues
+    model_input_name : str
 
-        csdl_model = ModuleCSDL()
-        csdl_model.add(map_in_csdl, 'map_in')
-        csdl_model.add_module(model_csdl, model_name_snake)
-        csdl_model.add(map_out_csdl, 'map_out')
-        self.csdl_model = csdl_model
+@dataclass
+class ModelOutputModule(ModelIOModule):
+    '''
+    A class for representing modules that map a variable out of a model.
 
-        return csdl_model
-    
-    # def evaluate(self, model_map=csdl.Model, inputs:list, outputs:list):
+    Parameters
+    ----------
+    name : str
+        The name of the mapping.
+    map : {np.ndarray, sps.csc_matrix}
+        The map that maps the variable in or out of the solver.
+    model_output_name : str
+        The name of the output as the model's csdl model is outputing.
+    module_output_name : str
+        The name that will be given to the evaluated function values.
+    module_output_mesh : am.MappedArray
+        The mesh that the function values are evaluated over.
+    '''
+    model_output_name : str
+    module_output_name : str
+    module_output_mesh : am.MappedArray
+
+class Model(Module):    # Solvers should be an instance of this
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
         
-    #     input_mappings_csdl = csdl.Model()
-    #     for input, input_map in inputs.items():
-    #         if input is not None:
-    #             num_state = np.prod(input.mesh.shape[:-1])
-    #             nodal_forces = input_mappings_csdl.declare_variable(name=input.name, shape=(num_state,input.num_dimensions))
-    #             model_force_inputs = csdl.matmat(input_map, nodal_forces)
-    #             input_mappings_csdl.register_output(, model_force_inputs)
+    def assign_attributes(self):
+        pass
 
+    # def _assemble_csdl(self, input:Function, output_mesh:am.MappedArray=None):
+    #     model_csdl = self.model._assemble_csdl()
+    #     self.model.construct_map_in(input)
+    #     self.model.construct_map_out(output_mesh)
 
+    #     model_name_camel = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', type(model_csdl).__name__)
+    #     model_name_snake = re.sub('([a-z0-9])([A-Z])', r'\1_\2', model_name_camel).lower()
+    #     map_in_csdl = self.model.map_in_csdl
+    #     # if map_in_csdl is None:
+    #     #     pass
+    #     #     map_in_csdl = identity
+    #     map_out_csdl = self.model.map_out_csdl
+    #     # if map_in_csdl is None:
+    #     #     map_out_csdl = identity
 
+    #     csdl_model = ModuleCSDL()
+    #     csdl_model.add(map_in_csdl, 'map_in')
+    #     csdl_model.add_module(model_csdl, model_name_snake)
+    #     csdl_model.add(map_out_csdl, 'map_out')
+    #     self.csdl_model = csdl_model
 
-    #     if nodal_forces is not None:
-    #         num_forces = np.cumprod(nodal_forces.shape[:-1])[-1]
-    #         nodal_forces = input_mappings_csdl.declare_variable(name='nodal_forces', shape=(num_forces,nodal_forces.shape[-1]))
-    #         model_force_inputs = csdl.matmat(force_map, nodal_forces)
-    #         input_mappings_csdl.register_output('left_wing_beam_forces', model_force_inputs)
-    #     if nodal_moments is not None:
-    #         num_moments = np.cumprod(nodal_moments.shape[:-1])[-1]
-    #         nodal_moments = input_mappings_csdl.declare_variable(name='nodal_moments', shape=(num_moments,nodal_moments.shape[-1]))
-    #         model_moment_inputs = csdl.matmat(moment_map, nodal_moments)
-    #         input_mappings_csdl.register_output('left_wing_beam_moments', model_moment_inputs)
-
-    #     beam_csdl = self._assemble_csdl()
-
-    #     output_mappings_csdl = csdl.Model()
-    #     if nodal_displacements is not None:
-    #         num_displacements = np.cumprod(nodal_displacements.shape[:-1])[-1]
-    #         nodal_displacements = output_mappings_csdl.declare_variable(name='left_wing_beam_displacements', shape=(num_displacements,nodal_displacements.shape[-1]))
-    #         model_displacement_outputs = csdl.matmat(displacement_map, nodal_displacements)
-    #         output_mappings_csdl.register_output('nodal_displacements', model_displacement_outputs)
-    #     if nodal_rotations is not None:
-    #         num_rotations = np.cumprod(nodal_rotations.shape[:-1])[-1]
-    #         nodal_rotations = output_mappings_csdl.declare_variable(name='left_wing_beam_rotations', shape=(num_rotations,nodal_rotations.shape[-1]))
-    #         model_rotation_outputs = csdl.matmat(rotation_map, nodal_rotations)
-    #         output_mappings_csdl.register_output('nodal_rotations', model_rotation_outputs)
-
-    #     csdl_model.add(submodel=input_mappings_csdl, name='beam_inputs_mapping')
-    #     csdl_model.add(submodel=beam_csdl, name='beam_model')
-    #     csdl_model.add(submodel=output_mappings_csdl, name='beam_outputs_mapping')
-
-    #     nodal_displacements = m3l.NodalState(mesh=nodal_outputs_mesh, upstream_states=[nodal_forces, nodal_moments], map=csdl_model)
-    #     nodal_rotations = m3l.NodalState(mesh=nodal_outputs_mesh, upstream_states=[nodal_forces, nodal_moments], map=csdl_model)
+    #     return csdl_model
     
-    def evaluate_symbolic(self, input:Function, output_mesh:am.MappedArray=None):
+    def construct_module_csdl(self, model_map:csdl.Model, input_modules:List[ModelInputModule], output_modules:List[ModelOutputModule]):
         '''
-        Symbolically evaluates the model. A symbolic M3L Function is returned.
+        Automates a significant portion of a model's evaluate method.
+
+        Parameters
+        ----------
+        model_map : csdl.Model
+            The csdl model for the solver/model.
+        input_modules : List[ModelInputModule]
+            The list of input modules that map into the solver/model.
+        output_modules : List[ModelOutputModule]
+            The list of output modules that map out of the solver/model.
+
+        Returns
+        -------
+        outputs : tuple
+            A tuple containing the FunctionValues object corresponding to each output module.
         '''
-        if self.csdl_model is None:
-            self._assemble_csdl(input=input, output_mesh=output_mesh)
+        
+        module_csdl = ModuleCSDL()
 
-        if type(input) is Function:
-            num_state_values = np.cumprod(output_mesh.shape[:-1])[-1]
-            output_state = Function(name='solver_output', shape=output_mesh.shape, region=input.region, mesh=output_mesh, upstream_states=[input], relative_map=self.csdl_model)
-            # NOTE: WARNING: the shape above will only be correct if the output is like displacement with size 3.
-            return output_state
+        inputs_dictionary = {}
+        input_mappings_csdl = csdl.Model()
+        for input_module in input_modules:
+            module_input = input_module.module_input
+            map = input_module.map
+            model_input_name = input_module.model_input_name
+            if module_input is None:
+                continue
 
-        # elif type(input) is am.MappedArray or type(input) is np.ndarray:  # could implement numerical evaluation too
-        #     # I think this would ideally call the original model's evaluate method
-        #     self.model.evaluate(input)
+            if module_input is not None:
+                num_variable = np.prod(module_input.mesh.shape[:-1])
+                module_input_csdl = input_mappings_csdl.declare_variable(name=module_input.name, shape=(num_variable, 3)) # 3 hardcoded because need info
+                map_csdl = input_mappings_csdl.create_input(f'{input_module.name}_map', val=map)
+                model_input_csdl = csdl.matmat(map_csdl, module_input_csdl)
+                input_mappings_csdl.register_output(model_input_name, model_input_csdl)
+
+                inputs_dictionary[module_input.name] = module_input
+
+        output_mappings_csdl = csdl.Model()
+        for output_module in output_modules:
+            model_output_name = output_module.model_output_name
+            map = output_module.map
+            module_output_name = output_module.module_output_name
+
+            model_output_csdl = output_mappings_csdl.declare_variable(name=model_output_name, shape=(map.shape[-1],3))  # 3 hardcoded because need info
+            map_csdl = output_mappings_csdl.create_input(f'{output_module.name}_map', val=map)
+            module_output_csdl = csdl.matmat(map_csdl, model_output_csdl)
+            output_mappings_csdl.register_output(module_output_name, module_output_csdl)
 
 
+        module_csdl.add(submodel=input_mappings_csdl, name='inputs_module')
+        module_csdl.add(submodel=model_map, name='model')
+        module_csdl.add(submodel=output_mappings_csdl, name='outputs_module')
+
+        outputs = []
+        for output_module in output_modules:
+            output = FunctionValues(name=output_module.module_output_name,
+                                    upstream_variables=inputs_dictionary,
+                                    map=module_csdl,
+                                    mesh=output_module.module_output_mesh)
+            outputs.append(output)
+        
+        return tuple(outputs)
 
 
 class ModelGroup:   # Implicit (or not implicit?) model groups should be an instance of this
-    
+    '''
+    A class for storing a group of M3L models. These can be used to establish coupling loops.
+    '''
+
     def __init__(self) -> None:
+        '''
+        Constructs a model group.
+        '''
         self.models = {}
         self.variables = {}
         self.outputs = {}
         self.residuals = {}
         self.parameters = None
 
-    def add(self, submodel:Model, name:str):
-        self.models[name] = submodel
-        # attributes = vars(submodel)
-        # for attribute_name, attribute_value in attributes.items():
-        #     setattr(self, attribute_name, attribute_value)
+    # def add(self, submodel:Model, name:str):
+    #     self.models[name] = submodel
 
     def add_output(self, output:Function):
+        '''
+        Registers an output to the model group so the model group will compute and output this variable.
+
+        Parameters
+        ----------
+        output : Function
+            The function for which the model group will output its coefficients.
+        '''
         self.outputs[output.name] = output
 
     def add_residual(self, residual:Function):
+        '''
+        Adds a residual to define a coupling loop.
+
+        Parameters
+        ----------
+        residual : Function
+            The residual that the model group will try to drive to 0.
+        '''
         self.residuals[residual.name] = residual
 
     def set_implicit_solver(self, solver):
+        '''
+        Sets an implicit solver for the model group.
+
+        Parameters
+        ----------
+        solver : ?
+            The solver object.
+        '''
         self.implicit_solver = solver
 
     # def assemble_state(self, state):
