@@ -10,4 +10,10 @@ sphinx-copybutton
 sphinx-autoapi
 numpydoc
 gitpython
-git+https://github.com/anugrahjo/sphinx-collections.git
+# git+https://github.com/anugrahjo/sphinx-collections.git
+
+# non-doc related stuff
+git+https://github.com/LSDOlab/csdl.git
+git+https://github.com/LSDOlab/lsdo_modules.git
+git+https://github.com/LSDOlab/array_mapper.git
+
