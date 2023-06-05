@@ -12,7 +12,7 @@
 [![Forks](https://img.shields.io/github/forks/LSDOlab/m3l.svg)](https://github.com/LSDOlab/m3l/network)
 [![Issues](https://img.shields.io/github/issues/LSDOlab/m3l.svg)](https://github.com/LSDOlab/m3l/issues)
 
-A package for modularly specifying model data transfer.
+A package for modularly specifying model data transfer. For docs, see https://m3l.readthedocs.io/en/latest/index.html.
 
 # Installation
 
