@@ -8,10 +8,9 @@
 [![PyPI Monthly Downloads][12]][11]
 -->
 
-[![GitHub Actions Test Badge](https://github.com/LSDOlab/lsdo_project_template/actions/workflows/actions.yml/badge.svg)](https://github.com/lsdo_project_template/lsdo_project_template/actions)
-[![Forks](https://img.shields.io/github/forks/LSDOlab/lsdo_project_template.svg)](https://github.com/LSDOlab/lsdo_project_template/network)
-[![Issues](https://img.shields.io/github/issues/LSDOlab/lsdo_project_template.svg)](https://github.com/LSDOlab/lsdo_project_template/issues)
-
+[![GitHub Actions Test Badge](https://github.com/LSDOlab/m3l/actions/workflows/actions.yml/badge.svg)](https://github.com/LSDOLab/m3l/actions)
+[![Forks](https://img.shields.io/github/forks/LSDOlab/m3l.svg)](https://github.com/LSDOlab/m3l/network)
+[![Issues](https://img.shields.io/github/issues/LSDOlab/m3l.svg)](https://github.com/LSDOlab/m3l/issues)
 
 A template repository for LSDOlab projects
 
