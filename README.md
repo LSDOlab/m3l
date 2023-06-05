@@ -14,8 +14,6 @@
 
 A package for modularly specifying model data transfer.
 
-*README.md file contains high-level information about your package: it's purpose, high-level instructions for installation and usage.*
-
 # Installation
 
 ## Installation instructions for users
