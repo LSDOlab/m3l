@@ -1,4 +1,4 @@
-# lsdo_project_template
+# Multi-fidelity Multi-disciplinary Modelling Language (M3L)
 
 <!---
 [![Python](https://img.shields.io/pypi/pyversions/lsdo_project_template)](https://img.shields.io/pypi/pyversions/lsdo_project_template)

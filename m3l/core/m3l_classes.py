@@ -10,10 +10,6 @@ from lsdo_modules.module.module import Module
 
 import re
 
-'''
-This is a test.
-'''
-
 ''' Classes representing spaces '''
 @dataclass
 class Field:
