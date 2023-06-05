@@ -1,4 +1,4 @@
-# Welcome to lsdo_project_template
+# Welcome to M3L
 
 ![alt text](/src/images/lsdolab.png "Title displayed")
 
