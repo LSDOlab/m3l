@@ -2,18 +2,11 @@
 title: Background
 ---
 
-This page is intended to provide the reader with any theoretical
-knowledge or other concepts that form the basis of your package.
-This page can include equations, figures, flowcharts, etc. for a better understanding of the theory behind
-the package along with any code snippets necessary to explain the software design.
+![alt text](/src/images/SISR.png "SISR diagram")
 
-## Referencing using bib files
+M3L works together with CADDEE to facilitate solver-independent data transfer. 
 
-You can add references in the `references.bib` file and cite them 
-in the page like this {cite:p}`perez2011python`. 
-You can also include a list of references cited at the end as shown below.
-
-## Bibliography
-
-```{bibliography} references.bib
-```
+Solver independence is achieved by coupling each model with a neuteral framework representation of relevant states.
+Data is transfered between model and framework using an intermediate nodal representation.
+Models are responsible for generating linear maps between the nodal representation and their internal repersentation of states.
+:math: P_{mm'}
