@@ -41,7 +41,6 @@ class FunctionSpace:
 
 
 ''' Classes functions and information '''
-@dataclass(kw_only=True)
 class Variable:
     '''
     A general M3L variable.
@@ -62,8 +61,7 @@ class Variable:
     map : csdl.Model = None
     value : np.ndarray = None
 
-@dataclass(kw_only=True)
-class Vector(Variable):
+class Vector:
     '''
     A general vector class.
 
@@ -80,12 +78,15 @@ class Vector(Variable):
     vector_space : VectorSpace
         The vector space from which this vector is defined.
     '''
+    name : str
     vector_space : VectorSpace
+    upstream_variables : dict = None
+    map : csdl.Model = None
+    value : np.ndarray = None
 
     def __post_init__(self):
         self.value = self.values
 
-@dataclass(kw_only=True)
 class FunctionValues(Variable):
     '''
     A class for representing the evaluation of a function over a mesh.
@@ -103,13 +104,16 @@ class FunctionValues(Variable):
     mesh : am.MappedArray
         The mesh over which the function is evaluated.
     '''
+    name : str
     mesh : am.MappedArray
+    upstream_variables : dict = None
+    map : csdl.Model = None
+    value : np.ndarray = None
 
     def __post_init__(self):
         self.values = self.value
 
-@dataclass(kw_only=True)
-class Function(Variable):
+class Function:
     '''
     A class for representing a general function.
 
@@ -121,18 +125,21 @@ class Function(Variable):
         A dictionary containing the immediate inputs to the map to compute this variable.
     map : csdl.Model = None
         A CSDL Model that computes this variable given input of the upstream variables.
-    value : np.ndarray = None
-        The value of the variable.
-    mesh : am.MappedArray
-        The mesh over which the function is evaluated.
+    function_space : FunctionSpace
+        The function space from which this function is defined.
+    coefficients : np.ndarray = None
+        The coefficients of the function.
     '''
+    name : str
+    upstream_variables : dict = None
+    map : csdl.Model = None
     function_space : FunctionSpace
     coefficients : np.ndarray = None
 
-    def __call__(self, mesh) -> FunctionValues:
+    def __call__(self, mesh : am.MappedArray) -> FunctionValues:
         return self.evaluate(mesh)
 
-    def evaluate(self, mesh):
+    def evaluate(self, mesh : am.MappedArray) -> FunctionValues:
         '''
         Evaluate the function at a given set of nodal locations.
 
@@ -250,6 +257,9 @@ class ModelOutputModule(ModelIOModule):
     module_output_mesh : am.MappedArray
 
 class Model(Module):    # Solvers should be an instance of this
+    '''
+    Parent model class that solvers/models should inherit from.
+    '''
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -357,45 +367,47 @@ class ModelGroup:   # Implicit (or not implicit?) model groups should be an inst
         '''
         self.models = {}
         self.variables = {}
-        self.outputs = {}
-        self.residuals = {}
+        self.states = {}
         self.parameters = None
 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
 
-    def add_output(self, output:Function):
+    def add_state(self, state:Function):
         '''
-        Registers an output to the model group so the model group will compute and output this variable.
+        Registers a state to the model group so the model group will compute and output this variable.
+        If inverse_evaluate is called on a variable that already has a value, the residual is identified
+        and an implicit solver is used.
 
         Parameters
         ----------
         output : Function
             The function for which the model group will output its coefficients.
         '''
-        self.outputs[output.name] = output
+        self.states[state.name] = state
 
-    def add_residual(self, residual:Function):
+
+    def set_linear_solver(self, linear_solver:csdl.Solver):
         '''
-        Adds a residual to define a coupling loop.
+        Sets a linear solver for the model group to resolve couplings.
 
         Parameters
         ----------
-        residual : Function
-            The residual that the model group will try to drive to 0.
-        '''
-        self.residuals[residual.name] = residual
-
-    def set_implicit_solver(self, solver):
-        '''
-        Sets an implicit solver for the model group.
-
-        Parameters
-        ----------
-        solver : ?
+        solver : csdl.Solver
             The solver object.
         '''
-        self.implicit_solver = solver
+        self.linear_solver = linear_solver
+
+    def set_nonlinear_solver(self, nonlinear_solver:csdl.Solver):
+        '''
+        Sets a nonlinear solver for the model group to resolve couplings.
+
+        Parameters
+        ----------
+        solver : csdl.Solver
+            The solver object.
+        '''
+        self.nonlinear_solver_solver = nonlinear_solver
 
     # def assemble_state(self, state):
     #     if state.absolute_map is not None:
