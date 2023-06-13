@@ -41,6 +41,7 @@ class FunctionSpace:
 
 
 ''' Classes functions and information '''
+@dataclass
 class Variable:
     '''
     A general M3L variable.
@@ -61,6 +62,7 @@ class Variable:
     map : csdl.Model = None
     value : np.ndarray = None
 
+@dataclass
 class Vector:
     '''
     A general vector class.
@@ -87,7 +89,8 @@ class Vector:
     def __post_init__(self):
         self.value = self.values
 
-class FunctionValues(Variable):
+@dataclass
+class FunctionValues:
     '''
     A class for representing the evaluation of a function over a mesh.
 
@@ -113,6 +116,7 @@ class FunctionValues(Variable):
     def __post_init__(self):
         self.values = self.value
 
+@dataclass
 class Function:
     '''
     A class for representing a general function.
@@ -131,9 +135,9 @@ class Function:
         The coefficients of the function.
     '''
     name : str
+    function_space : FunctionSpace
     upstream_variables : dict = None
     map : csdl.Model = None
-    function_space : FunctionSpace
     coefficients : np.ndarray = None
 
     def __call__(self, mesh : am.MappedArray) -> FunctionValues:
@@ -367,13 +371,13 @@ class ModelGroup:   # Implicit (or not implicit?) model groups should be an inst
         '''
         self.models = {}
         self.variables = {}
-        self.states = {}
+        self.outputs = {}
         self.parameters = None
 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
 
-    def add_state(self, state:Function):
+    def register_output(self, output:Function):
         '''
         Registers a state to the model group so the model group will compute and output this variable.
         If inverse_evaluate is called on a variable that already has a value, the residual is identified
@@ -384,7 +388,7 @@ class ModelGroup:   # Implicit (or not implicit?) model groups should be an inst
         output : Function
             The function for which the model group will output its coefficients.
         '''
-        self.states[state.name] = state
+        self.outputs[output.name] = output
 
 
     def set_linear_solver(self, linear_solver:csdl.Solver):
