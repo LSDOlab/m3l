@@ -37,6 +37,7 @@ extensions = [
     "sphinx.ext.viewcode",          # adds the source code for classes and functions in auto generated api ref
     "sphinxcontrib.collections",    # adds files from outside src and executes functions before Sphinx builds
     "sphinxcontrib.bibtex",         # for references and citations
+    "sphinx.ext.imgmath",
 ]
 
 # sphinxcontrib.bibtex options
