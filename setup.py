@@ -12,7 +12,7 @@ setup(
     keywords='sisr data transfer',
     url='http://github.com/LSDOlab/m3l',
     download_url='',
-    description='A module for solver-independent data transfer in CADDEE',
+    description='A language for modeling multidisciplinary and multifidelity systems',
     long_description=long_description,
     long_description_content_type='text/markdown',
     packages=find_packages(),

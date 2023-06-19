@@ -8,63 +8,28 @@ import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
 from lsdo_modules.module.module import Module
 
+''' Classes representing spaces '''
+@dataclass
+class Field:
+    '''
+    A class for representing mathematical fields such as the field of all real numbers.
+    '''
+    pass    # This may potentially have more information in the future
 
 @dataclass
-class Node:
+class VectorSpace:
     '''
-    name : str
-        The name of the node.
-    '''
-    name : str
-
-@dataclass
-class Operation(Node):
-    '''
-    An M3L operation. This represents a mapping/model/operation/tranformation in the overall model.
+    A class for representing vector spaces.
 
     Parameters
     ----------
-    name : str
-        The name of the variable.
-    arguments : List[Variable]
-        The list of Variables that are arguments to the operation.
-    value : np.ndarray = None
-        The value of the variable.
+    field : Field
+        The field that the vector space is defined over.
+    dimensions : tuple
+        The dimensions/shape of the vectors.
     '''
-    arguments : list
-
-
-@dataclass
-class Variable:
-    '''
-    An M3L variable. This represents information in the model.
-
-    Parameters
-    ----------
-    name : str
-        The name of the variable.
-    operation : Opeation = None
-        The operation that computes this variable. If none, this variable is a top-level input.
-    value : np.ndarray = None
-        The value of the variable.
-    '''
-    name : str
-    operation : Operation = None
-    value : np.ndarray = None
-
-
-@dataclass
-class NDArray(Variable):
-    '''
-    An n-dimensional array.
-
-    name : str
-        The name of the array.
-    shape : tuple
-        The shape of the array.
-    '''
-    shape : tuple
-
+    field : Field
+    dimensions : tuple
 
 @dataclass
 class FunctionSpace:
@@ -75,6 +40,82 @@ class FunctionSpace:
     pass    # do we want separate class for state functions that point to a reference geometry?
 
 
+''' Classes functions and information '''
+@dataclass
+class Variable:
+    '''
+    A general M3L variable.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
+    '''
+    name : str
+    upstream_variables : dict = None
+    map : csdl.Model = None
+    value : np.ndarray = None
+
+@dataclass
+class Vector:
+    '''
+    A general vector class.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
+    vector_space : VectorSpace
+        The vector space from which this vector is defined.
+    '''
+    name : str
+    vector_space : VectorSpace
+    upstream_variables : dict = None
+    map : csdl.Model = None
+    value : np.ndarray = None
+
+    def __post_init__(self):
+        self.value = self.values
+
+@dataclass
+class FunctionValues:
+    '''
+    A class for representing the evaluation of a function over a mesh.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
+    value : np.ndarray = None
+        The value of the variable.
+    mesh : am.MappedArray
+        The mesh over which the function is evaluated.
+    '''
+    name : str
+    mesh : am.MappedArray
+    upstream_variables : dict = None
+    map : csdl.Model = None
+    value : np.ndarray = None
+
+    def __post_init__(self):
+        self.values = self.value
+
 @dataclass
 class Function:
     '''
@@ -83,20 +124,26 @@ class Function:
     Parameters
     ----------
     name : str
-        The name of the function.
+        The name of the variable.
+    upstream_variables : dict = None
+        A dictionary containing the immediate inputs to the map to compute this variable.
+    map : csdl.Model = None
+        A CSDL Model that computes this variable given input of the upstream variables.
     function_space : FunctionSpace
         The function space from which this function is defined.
-    coefficients : NDarray = None
+    coefficients : np.ndarray = None
         The coefficients of the function.
     '''
     name : str
     function_space : FunctionSpace
-    coefficients : NDArray = None
+    upstream_variables : dict = None
+    map : csdl.Model = None
+    coefficients : np.ndarray = None
 
-    def __call__(self, mesh : am.MappedArray) -> NDArray:
+    def __call__(self, mesh : am.MappedArray) -> FunctionValues:
         return self.evaluate(mesh)
 
-    def evaluate(self, mesh : am.MappedArray) -> NDArray:
+    def evaluate(self, mesh : am.MappedArray) -> FunctionValues:
         '''
         Evaluate the function at a given set of nodal locations.
 
@@ -127,10 +174,10 @@ class Function:
 
         # Idea: Have the MappedArray store the parametric coordinates so we don't have to repeatendly perform projection.
 
-        function_values = NDArray(name=output_name, upstream_variables={self.name:self}, map=csdl_map, mesh=mesh)
+        function_values = FunctionValues(name=output_name, upstream_variables={self.name:self}, map=csdl_map, mesh=mesh)
         return function_values
     
-    def inverse_evaluate(self, function_values:NDArray):
+    def inverse_evaluate(self, function_values:FunctionValues):
         '''
         Performs an inverse evaluation to set the coefficients of this function given an input of evaluated points over a mesh.
 
@@ -188,7 +235,7 @@ class ModelInputModule(ModelIOModule):
     model_input_name : str
         The name of input as the model's csdl model is expecting.
     '''
-    module_input : NDArray
+    module_input : FunctionValues
     model_input_name : str
 
 @dataclass
@@ -304,7 +351,7 @@ class Model(Module):    # Solvers should be an instance of this
 
         outputs = []
         for output_module in output_modules:
-            output = NDArray(name=output_module.module_output_name,
+            output = FunctionValues(name=output_module.module_output_name,
                                     upstream_variables=inputs_dictionary,
                                     map=module_csdl,
                                     mesh=output_module.module_output_mesh)
