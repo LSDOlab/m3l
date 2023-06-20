@@ -33,6 +33,11 @@ class Operation(Node):
     '''
     arguments : list
 
+# class ExplicitOperation(Module):
+#     pass
+
+# class ImplicitOperation(Module):
+#     pass
 
 @dataclass
 class Variable:
@@ -54,7 +59,7 @@ class Variable:
 
 
 @dataclass
-class NDArray(Variable):
+class NDArray:
     '''
     An n-dimensional array.
 
@@ -63,7 +68,10 @@ class NDArray(Variable):
     shape : tuple
         The shape of the array.
     '''
-    shape : tuple
+    name : str
+    shape : np.ndarray
+    operation : Operation = None
+    value : np.ndarray = None
 
 
 @dataclass
