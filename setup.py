@@ -26,7 +26,7 @@ setup(
         'sphinx-copybutton',
         'sphinx-autoapi',
         'numpydoc',
-        'python-poetry',
+        # 'python-poetry',
         'gitpython', 
         #'sphinxcontrib-collections @ git+https://github.com/anugrahjo/sphinx-collections.git', # 'sphinx-collections',
         'sphinxcontrib-bibtex',
