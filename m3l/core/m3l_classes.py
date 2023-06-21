@@ -28,16 +28,32 @@ class Operation(Node):
         The name of the variable.
     arguments : List[Variable]
         The list of Variables that are arguments to the operation.
-    value : np.ndarray = None
-        The value of the variable.
     '''
     arguments : list
 
-# class ExplicitOperation(Module):
-#     pass
 
-# class ImplicitOperation(Module):
-#     pass
+@dataclass
+class CSDLOperation(Operation):
+    '''
+    An M3L CSDL operation. This represents a mapping/model/operation/tranformation in the overall model. The operation is represented
+    as a CSDL model, making it a black box to M3L. This will be used to contain smaller/more basic operations.
+
+    Parameters
+    ----------
+    name : str
+        The name of the variable.
+    arguments : List[Variable]
+        The list of Variables that are arguments to the operation.
+    operation : csdl.Model
+        The CSDL model that contains the operation.
+    '''
+    operation_csdl : csdl.Model
+
+class ExplicitOperation(Module):
+    pass
+
+class ImplicitOperation(Module):
+    pass
 
 @dataclass
 class Variable:
@@ -48,30 +64,33 @@ class Variable:
     ----------
     name : str
         The name of the variable.
+    shape : tuple
+        The shape of the variable.
     operation : Opeation = None
         The operation that computes this variable. If none, this variable is a top-level input.
     value : np.ndarray = None
         The value of the variable.
     '''
     name : str
-    operation : Operation = None
-    value : np.ndarray = None
-
-
-@dataclass
-class NDArray:
-    '''
-    An n-dimensional array.
-
-    name : str
-        The name of the array.
     shape : tuple
-        The shape of the array.
-    '''
-    name : str
-    shape : np.ndarray
     operation : Operation = None
     value : np.ndarray = None
+
+
+# @dataclass
+# class NDArray:
+#     '''
+#     An n-dimensional array.
+
+#     name : str
+#         The name of the array.
+#     shape : tuple
+#         The shape of the array.
+#     '''
+#     name : str
+#     shape : np.ndarray
+#     operation : Operation = None
+#     value : np.ndarray = None
 
 
 @dataclass
@@ -99,12 +118,12 @@ class Function:
     '''
     name : str
     function_space : FunctionSpace
-    coefficients : NDArray = None
+    coefficients : Variable = None
 
-    def __call__(self, mesh : am.MappedArray) -> NDArray:
+    def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
 
-    def evaluate(self, mesh : am.MappedArray) -> NDArray:
+    def evaluate(self, mesh : am.MappedArray) -> Variable:
         '''
         Evaluate the function at a given set of nodal locations.
 
@@ -119,14 +138,16 @@ class Function:
             A variable representing the evaluated function values.
         '''
         num_values = np.prod(mesh.shape[:-1])
+        num_coefficients = np.prod(self.coefficients.shape[:-1])
         temp_map = np.eye(num_values, self.function_space.num_coefficients)
         temp_map[self.function_space.num_coefficients:,0] = np.ones((num_values-self.function_space.num_coefficients,))
         output_name = f'nodal_{self.name}'
+        output_shape = (num_values,self.coefficients.shape[-1])
 
         # csdl_map = csdl.Model()
         csdl_map = ModuleCSDL()
-        function_coefficients = csdl_map.declare_variable(self.name, shape=(self.function_space.num_coefficients,3))
-        map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map_over', temp_map)
+        function_coefficients = csdl_map.register_module_input(self.coefficients.name, shape=(num_coefficients, self.coefficients.shape[-1]))
+        map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map', temp_map)
         function_values_csdl = csdl.matmat(map_csdl, function_coefficients)
         csdl_map.register_output(output_name, function_values_csdl)
 
@@ -135,10 +156,12 @@ class Function:
 
         # Idea: Have the MappedArray store the parametric coordinates so we don't have to repeatendly perform projection.
 
-        function_values = NDArray(name=output_name, upstream_variables={self.name:self}, map=csdl_map, mesh=mesh)
+        # function_values = Variable(name=output_name, upstream_variables={self.name:self}, map=csdl_map, mesh=mesh)
+        evaluate_operation = CSDLOperation(name=f'{self.name}_evaluation', arguments=[self.coefficients], operation_csdl=csdl_map)
+        function_values = Variable(name=output_name, shape=output_shape, operation=evaluate_operation)
         return function_values
     
-    def inverse_evaluate(self, function_values:NDArray):
+    def inverse_evaluate(self, function_values:Variable):
         '''
         Performs an inverse evaluation to set the coefficients of this function given an input of evaluated points over a mesh.
 
@@ -149,19 +172,21 @@ class Function:
         '''
         # map = Perform B-spline fit and potentially some sort of conversion from extrinsic to intrinsic
 
-        num_values = np.prod(function_values.mesh.shape[:-1])
+        # num_values = np.prod(function_values.mesh.shape[:-1])
+        num_values = np.prod(function_values.shape[:-1])
         temp_map = np.eye(self.function_space.num_coefficients, num_values)
 
         # csdl_map = csdl.Model()
         csdl_map = ModuleCSDL()
-        function_values_csdl = csdl_map.declare_variable(function_values.name, shape=(num_values,3))
+        function_values_csdl = csdl_map.register_module_input(function_values.name, shape=(num_values,3))
         map_csdl = csdl_map.create_input(f'{self.name}_inverse_evaluation_map', temp_map)
         function_coefficients_csdl = csdl.matmat(map_csdl, function_values_csdl)
         csdl_map.register_output(f'{self.name}_coefficients', function_coefficients_csdl)
 
-        self.upstream_variables = {function_values.name:function_values}
-        self.map = csdl_map
-        return self
+        coefficients_shape = (temp_map.shape[0],3)
+        operation = CSDLOperation(name=f'{self.name}_inverse_evaluation', arguments=[function_values], operation_csdl=csdl_map)
+        function_coefficients = Variable(name=f'{self.name}_coefficients', shape=coefficients_shape, operation=operation)
+        return function_coefficients
 
 
 ''' Classes for representing models '''
@@ -196,7 +221,7 @@ class ModelInputModule(ModelIOModule):
     model_input_name : str
         The name of input as the model's csdl model is expecting.
     '''
-    module_input : NDArray
+    module_input : Variable
     model_input_name : str
 
 @dataclass
@@ -286,8 +311,8 @@ class Model(Module):    # Solvers should be an instance of this
                 continue
 
             if module_input is not None:
-                num_variable = np.prod(module_input.mesh.shape[:-1])
-                module_input_csdl = input_mappings_csdl.declare_variable(name=module_input.name, shape=(num_variable, 3)) # 3 hardcoded because need info
+                # num_variable = np.prod(module_input.shape[:-1])
+                module_input_csdl = input_mappings_csdl.declare_variable(name=module_input.name, shape=module_input.shape) # 3 hardcoded because need info
                 map_csdl = input_mappings_csdl.create_input(f'{input_module.name}_map', val=map)
                 model_input_csdl = csdl.matmat(map_csdl, module_input_csdl)
                 input_mappings_csdl.register_output(model_input_name, model_input_csdl)
@@ -309,13 +334,12 @@ class Model(Module):    # Solvers should be an instance of this
         module_csdl.add(submodel=input_mappings_csdl, name='inputs_module')
         module_csdl.add(submodel=model_map, name='model')
         module_csdl.add(submodel=output_mappings_csdl, name='outputs_module')
+        operation = Operation(name='solver_module', arguments=list(inputs_dictionary.values()))
 
         outputs = []
         for output_module in output_modules:
-            output = NDArray(name=output_module.module_output_name,
-                                    upstream_variables=inputs_dictionary,
-                                    map=module_csdl,
-                                    mesh=output_module.module_output_mesh)
+            output_shape = (output_module.map.shape[0],3)
+            output = Variable(name=output_module.module_output_name, shape=output_shape, operation=operation)
             outputs.append(output)
         
         return tuple(outputs)
@@ -331,7 +355,9 @@ class ModelGroup:   # Implicit (or not implicit?) model groups should be an inst
         Constructs a model group.
         '''
         self.models = {}
-        self.variables = {}
+        # self.variables = {}
+        self.operations = {}
+        self.inputs = {}
         self.outputs = {}
         self.parameters = None
 
@@ -400,29 +426,60 @@ class ModelGroup:   # Implicit (or not implicit?) model groups should be an inst
 
     #     state.absolute_map = absolute_map
 
-    def gather_variables(self, variable:Function):
-        if variable.upstream_variables is not None:
-            for upstream_variable_name, upstream_variable in variable.upstream_variables.items():
-                self.gather_variables(upstream_variable)
+    def gather_operations(self, variable:Variable):
+        if variable.operation is not None:
+            operation = variable.operation
+            for arg in operation.arguments:
+                self.gather_operations(arg)
 
-        self.variables[variable.name] = variable
+            if operation.name not in self.operations:
+                self.operations[operation.name] = operation
+        elif variable.name not in self.inputs:
+            self.inputs[variable.name] = variable
+
+    # def gather_variables(self, variable:Function):
+    #     if variable.upstream_variables is not None:
+    #         for upstream_variable_name, upstream_variable in variable.upstream_variables.items():
+    #             self.gather_variables(upstream_variable)
+
+    #     self.variables[variable.name] = variable
 
     def assemble(self):
         # Assemble output states
         for output_name, output in self.outputs.items():
-            self.gather_variables(output)
-            # self.assemble_state(output)
+            self.gather_operations(output)
+        
+        model_csdl = ModuleCSDL()
 
-        csdl_model = ModuleCSDL()
-        for variable_name, variable in self.variables.items():
-            if variable.upstream_variables is None:   # if state is an absolute input state (nothing upstream)
-                num_upstream_variable_values = variable.function_space.num_coefficients
-                upstream_variable_flattened_shape = (num_upstream_variable_values, 3)   # TODO: Need to figure out how to store the number of dims
-                csdl_model.register_module_input(variable.name, shape=upstream_variable_flattened_shape)
-            else:
-                csdl_model.add_module(submodule=variable.map, name=f'{variable.name}_model')
+        for operation_name, operation in reversed(self.operations.items()):
+
+            model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
+
+            for arg in operation.arguments:
+                if arg.operation is not None:
+                    model_csdl.connect(arg.operation.name+"."+arg.name, operation_name+"."+arg.name)
+
+        self.csdl_model = model_csdl                
+
+
+                    
+
+    # def assemble(self):
+    #     # Assemble output states
+    #     for output_name, output in self.outputs.items():
+    #         self.gather_variables(output)
+    #         # self.assemble_state(output)
+
+    #     csdl_model = ModuleCSDL()
+    #     for variable_name, variable in self.variables.items():
+    #         if variable.upstream_variables is None:   # if state is an absolute input state (nothing upstream)
+    #             num_upstream_variable_values = variable.function_space.num_coefficients
+    #             upstream_variable_flattened_shape = (num_upstream_variable_values, 3)   # TODO: Need to figure out how to store the number of dims
+    #             csdl_model.register_module_input(variable.name, shape=upstream_variable_flattened_shape)
+    #         else:
+    #             csdl_model.add_module(submodule=variable.map, name=f'{variable.name}_model')
             
-        self.csdl_model = csdl_model
+    #     self.csdl_model = csdl_model
 
 
 
