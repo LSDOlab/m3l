@@ -49,11 +49,53 @@ class CSDLOperation(Operation):
     '''
     operation_csdl : csdl.Model
 
+
 class ExplicitOperation(Module):
-    pass
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the model output.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        pass
+
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self) -> tuple:
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        TODO: This is solver-specific
+
+        Returns
+        -------
+        model_outputs : tuple(List[m3l.Variable])
+            The tuple of model outputs.
+        '''
+        pass
+        # NOTE to solver developers: I recommend looking at an example such as aframe.
+
 
 class ImplicitOperation(Module):
     pass
+
 
 @dataclass
 class Variable:
@@ -75,6 +117,15 @@ class Variable:
     shape : tuple
     operation : Operation = None
     value : np.ndarray = None
+
+    def __add__(self, other):
+        import m3l
+        return m3l.add(self, other)
+
+
+
+
+
 
 
 # @dataclass
@@ -142,13 +193,14 @@ class Function:
         temp_map = np.eye(num_values, self.function_space.num_coefficients)
         temp_map[self.function_space.num_coefficients:,0] = np.ones((num_values-self.function_space.num_coefficients,))
         output_name = f'nodal_{self.name}'
-        output_shape = (num_values,self.coefficients.shape[-1])
+        output_shape = tuple(mesh.shape[:-1]) + (self.coefficients.shape[-1],)
 
         # csdl_map = csdl.Model()
         csdl_map = ModuleCSDL()
         function_coefficients = csdl_map.register_module_input(self.coefficients.name, shape=(num_coefficients, self.coefficients.shape[-1]))
         map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map', temp_map)
-        function_values_csdl = csdl.matmat(map_csdl, function_coefficients)
+        flattened_function_values_csdl = csdl.matmat(map_csdl, function_coefficients)
+        function_values_csdl = csdl.reshape(flattened_function_values_csdl, new_shape=output_shape)
         csdl_map.register_output(output_name, function_values_csdl)
 
         # parametric_coordinates = self.function_space.reference_geometry.project(mesh.value, return_parametric_coordinates=True)
@@ -188,162 +240,6 @@ class Function:
         operation = CSDLOperation(name=f'{self.name}_inverse_evaluation', arguments=[function_values], operation_csdl=csdl_map)
         function_coefficients = Variable(name=f'{self.name}_coefficients', shape=coefficients_shape, operation=operation)
         return function_coefficients
-
-
-# ''' Classes for representing models '''
-# @dataclass
-# class ModelIOModule:
-#     '''
-#     A parent class for representing modules that map variables in or out of a model.
-
-#     Parameters
-#     ----------
-#     name : str
-#         The name of the mapping.
-#     map : {np.ndarray, sps.csc_matrix}
-#         The map that maps the variable in or out of the solver.
-#     '''
-#     name : str
-#     map : np.ndarray
-
-# @dataclass
-# class ModelInputModule(ModelIOModule):
-#     '''
-#     A class for representing modules that map a variable into a model.
-
-#     Parameters
-#     ----------
-#     name : str
-#         The name of the mapping.
-#     map : {np.ndarray, sps.csc_matrix}
-#         The map that maps the variable in or out of the solver.
-#     module_input : FunctionValues
-#         The input that will be mapped into the model.
-#     model_input_name : str
-#         The name of input as the model's csdl model is expecting.
-#     '''
-#     module_input : Variable
-#     model_input_name : str
-
-# @dataclass
-# class ModelOutputModule(ModelIOModule):
-#     '''
-#     A class for representing modules that map a variable out of a model.
-
-#     Parameters
-#     ----------
-#     name : str
-#         The name of the mapping.
-#     map : {np.ndarray, sps.csc_matrix}
-#         The map that maps the variable in or out of the solver.
-#     model_output_name : str
-#         The name of the output as the model's csdl model is outputing.
-#     module_output_name : str
-#         The name that will be given to the evaluated function values.
-#     module_output_mesh : am.MappedArray
-#         The mesh that the function values are evaluated over.
-#     '''
-#     model_output_name : str
-#     module_output_name : str
-#     module_output_mesh : am.MappedArray
-
-# class Model(Module):    # Solvers should be an instance of this
-#     '''
-#     Parent model class that solvers/models should inherit from.
-#     '''
-#     def __init__(self, **kwargs) -> None:
-#         super().__init__(**kwargs)
-#         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
-        
-#     def assign_attributes(self):
-#         pass
-
-#     # def _assemble_csdl(self, input:Function, output_mesh:am.MappedArray=None):
-#     #     model_csdl = self.model._assemble_csdl()
-#     #     self.model.construct_map_in(input)
-#     #     self.model.construct_map_out(output_mesh)
-
-#     #     model_name_camel = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', type(model_csdl).__name__)
-#     #     model_name_snake = re.sub('([a-z0-9])([A-Z])', r'\1_\2', model_name_camel).lower()
-#     #     map_in_csdl = self.model.map_in_csdl
-#     #     # if map_in_csdl is None:
-#     #     #     pass
-#     #     #     map_in_csdl = identity
-#     #     map_out_csdl = self.model.map_out_csdl
-#     #     # if map_in_csdl is None:
-#     #     #     map_out_csdl = identity
-
-#     #     csdl_model = ModuleCSDL()
-#     #     csdl_model.add(map_in_csdl, 'map_in')
-#     #     csdl_model.add_module(model_csdl, model_name_snake)
-#     #     csdl_model.add(map_out_csdl, 'map_out')
-#     #     self.csdl_model = csdl_model
-
-#     #     return csdl_model
-    
-#     def construct_module_csdl(self, model_map:csdl.Model, input_modules:List[ModelInputModule], output_modules:List[ModelOutputModule]):
-#         '''
-#         Automates a significant portion of a model's evaluate method.
-
-#         Parameters
-#         ----------
-#         model_map : csdl.Model
-#             The csdl model for the solver/model.
-#         input_modules : List[ModelInputModule]
-#             The list of input modules that map into the solver/model.
-#         output_modules : List[ModelOutputModule]
-#             The list of output modules that map out of the solver/model.
-
-#         Returns
-#         -------
-#         outputs : tuple
-#             A tuple containing the FunctionValues object corresponding to each output module.
-#         '''
-        
-#         module_csdl = ModuleCSDL()
-
-#         inputs_dictionary = {}
-#         input_mappings_csdl = csdl.Model()
-#         for input_module in input_modules:
-#             module_input = input_module.module_input
-#             map = input_module.map
-#             model_input_name = input_module.model_input_name
-#             if module_input is None:
-#                 continue
-
-#             if module_input is not None:
-#                 # num_variable = np.prod(module_input.shape[:-1])
-#                 module_input_csdl = input_mappings_csdl.declare_variable(name=module_input.name, shape=module_input.shape) # 3 hardcoded because need info
-#                 map_csdl = input_mappings_csdl.create_input(f'{input_module.name}_map', val=map)
-#                 model_input_csdl = csdl.matmat(map_csdl, module_input_csdl)
-#                 input_mappings_csdl.register_output(model_input_name, model_input_csdl)
-
-#                 inputs_dictionary[module_input.name] = module_input
-
-#         output_mappings_csdl = csdl.Model()
-#         for output_module in output_modules:
-#             model_output_name = output_module.model_output_name
-#             map = output_module.map
-#             module_output_name = output_module.module_output_name
-
-#             model_output_csdl = output_mappings_csdl.declare_variable(name=model_output_name, shape=(map.shape[-1],3))  # 3 hardcoded because need info
-#             map_csdl = output_mappings_csdl.create_input(f'{output_module.name}_map', val=map)
-#             module_output_csdl = csdl.matmat(map_csdl, model_output_csdl)
-#             output_mappings_csdl.register_output(module_output_name, module_output_csdl)
-
-
-#         module_csdl.add(submodel=input_mappings_csdl, name='inputs_module')
-#         module_csdl.add(submodel=model_map, name='model')
-#         module_csdl.add(submodel=output_mappings_csdl, name='outputs_module')
-#         operation = Operation(name='solver_module', arguments=list(inputs_dictionary.values()))
-
-#         outputs = []
-#         for output_module in output_modules:
-#             output_shape = (output_module.map.shape[0],3)
-#             output = Variable(name=output_module.module_output_name, shape=output_shape, operation=operation)
-#             outputs.append(output)
-        
-#         return tuple(outputs)
 
 
 class Model:   # Implicit (or not implicit?) model groups should be an instance of this
@@ -419,7 +315,11 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
 
-            model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name) # should I suppress promotions here?
+            if type(operation.operation_csdl) is csdl.Model:
+                model_csdl.add(submodel=operation.operation_csdl, name=operation.name) # should I suppress promotions here?
+            else: # type(operation.operation_csdl) is ModuleCSDL:
+                model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name) # should I suppress promotions here?
+            
 
             for arg_name, arg in operation.arguments.items():
                 if arg.operation is not None:
