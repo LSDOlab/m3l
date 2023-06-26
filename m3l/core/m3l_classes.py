@@ -123,11 +123,6 @@ class Variable:
         return m3l.add(self, other)
 
 
-
-
-
-
-
 # @dataclass
 # class NDArray:
 #     '''
@@ -316,18 +311,18 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
 
             if type(operation.operation_csdl) is csdl.Model:
-                model_csdl.add(submodel=operation.operation_csdl, name=operation.name) # should I suppress promotions here?
+                model_csdl.add(submodel=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
             else: # type(operation.operation_csdl) is ModuleCSDL:
-                model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name) # should I suppress promotions here?
+                model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
             
 
             for arg_name, arg in operation.arguments.items():
                 if arg.operation is not None:
-                    # model_csdl.connect(arg.operation.name+"."+arg.name, operation_name+"."+arg_name)  # Something like this for no promotions
-                    if arg.name == arg_name:
-                        continue    # promotion will automatically connect if the names match
-                    else:
-                        model_csdl.connect(arg.name, arg_name)  # If names don't match, connect manually
+                    model_csdl.connect(arg.operation.name+"."+arg.name, operation_name+"."+arg_name)  # Something like this for no promotions
+                    # if arg.name == arg_name:
+                    #     continue    # promotion will automatically connect if the names match
+                    # else:
+                    #     model_csdl.connect(arg.name, arg_name)  # If names don't match, connect manually
 
         self.csdl_model = model_csdl
         return self.csdl_model
