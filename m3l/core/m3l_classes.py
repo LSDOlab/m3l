@@ -254,7 +254,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
 
-    def register_output(self, output:Function):
+    def register_output(self, output:Variable):
         '''
         Registers a state to the model group so the model group will compute and output this variable.
         If inverse_evaluate is called on a variable that already has a value, the residual is identified
@@ -262,10 +262,18 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         Parameters
         ----------
-        output : Function
-            The function for which the model group will output its coefficients.
+        output : Variable
+            The variable that the model will output.
         '''
-        self.outputs[output.name] = output
+        if isinstance(output, dict):
+            for key, value in output.items():
+                self.outputs[value.name] = value
+        elif type(output) is Variable:
+            self.outputs[output.name] = output
+        else:
+            print(type(output))
+            raise NotImplementedError
+        # self.outputs[output.name] = output
 
 
     def set_linear_solver(self, linear_solver:csdl.Solver):
