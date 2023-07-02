@@ -353,7 +353,7 @@ class FunctionEvaluation(ExplicitOperation):
 
         csdl_map = ModuleCSDL()
         function_coefficients = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
-                                                                val=coefficients.value)
+                                                                val=coefficients.value.reshape((-1, coefficients.shape[-1])))
         map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map', temp_map)
         flattened_function_values_csdl = csdl.matmat(map_csdl, function_coefficients)
         function_values_csdl = csdl.reshape(flattened_function_values_csdl, new_shape=output_shape)
