@@ -119,6 +119,11 @@ class ImplicitOperation(Operation):
     def evaluate_residuals(self):
         '''
         Solver developer API method for the backend to call.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the residuals.
         '''
         pass
 
@@ -126,6 +131,11 @@ class ImplicitOperation(Operation):
     def compute_derivatives(self):
         '''
         Solver developer API method for the backend to call.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -139,6 +149,11 @@ class ImplicitOperation(Operation):
     def compute_invariant_matrix(self):
         '''
         Solver developer API method for the backend to call.
+
+        Returns
+        -------
+        invariant_matrix_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the invariant matrix for the SIFR methodology.
         '''
         pass
 
@@ -146,6 +161,15 @@ class ImplicitOperation(Operation):
         '''
         User API method for the user/runscript to call.
         TODO: Replace this method header with information appropriate for user.
+
+        Parameters
+        ----------
+        TODO: This is solver-specific
+
+        Returns
+        -------
+        model_outputs : tuple(List[m3l.Variable])
+            The tuple of model outputs.
         '''
         pass
 
