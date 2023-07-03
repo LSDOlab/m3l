@@ -108,8 +108,47 @@ class ExplicitOperation(Operation):
         # NOTE to solver developers: I recommend looking at an example such as aframe.
 
 
-class ImplicitOperation(Module):
-    pass
+class ImplicitOperation(Operation):
+    
+    def assign_attributes(self):
+        '''
+        Assigns class attributes to make class more like standard python class.
+        '''
+        pass
+
+    def evaluate_residuals(self):
+        '''
+        Solver developer API method for the backend to call.
+        '''
+        pass
+
+    # only needed for dynamic stuff
+    def compute_derivatives(self):
+        '''
+        Solver developer API method for the backend to call.
+        '''
+        pass
+
+    # optional method
+    def solve_residual_equations(self):
+        '''
+        Solver developer API method for the backend to call.
+        '''
+        pass
+
+    def compute_invariant_matrix(self):
+        '''
+        Solver developer API method for the backend to call.
+        '''
+        pass
+
+    def evaluate(self) -> tuple:
+        '''
+        User API method for the user/runscript to call.
+        TODO: Replace this method header with information appropriate for user.
+        '''
+        pass
+
 
 
 @dataclass
@@ -240,7 +279,7 @@ class Function:
         The coefficients of the function.
     '''
     name : str
-    function_space : FunctionSpace
+    space : FunctionSpace
     coefficients : Variable = None
 
     def __call__(self, mesh : am.MappedArray) -> Variable:
@@ -341,7 +380,7 @@ class FunctionEvaluation(ExplicitOperation):
         '''
 
         mesh = self.mesh
-        function_space = self.function.function_space
+        function_space = self.function.space
         coefficients = self.arguments['coefficients']
 
         num_values = np.prod(mesh.shape[:-1])
