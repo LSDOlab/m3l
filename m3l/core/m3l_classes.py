@@ -374,7 +374,17 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         output : Function
             The function for which the model group will output its coefficients.
         '''
-        self.outputs[output.name] = output
+        if isinstance(output, dict):
+            for key, value in output.items():
+                self.outputs[value.name] = value
+        elif isinstance(output, (Function, Variable)):
+            self.outputs[output.name] = output
+        elif isinstance(output, list):
+            for entry in output:
+                self.outputs[entry.name] = entry
+        else:
+            print(type(output))
+            raise NotImplementedError
 
 
     def set_linear_solver(self, linear_solver:csdl.Solver):
@@ -416,18 +426,21 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             self.gather_operations(output)
         
         model_csdl = ModuleCSDL()
-
+        # print(self.outputs.keys())
+        # exit()
+        
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
 
-            model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name) # should I suppress promotions here?
+            model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
 
             for arg_name, arg in operation.arguments.items():
+                # print(operation.arguments)
                 if arg.operation is not None:
-                    # model_csdl.connect(arg.operation.name+"."+arg.name, operation_name+"."+arg_name)  # Something like this for no promotions
-                    if arg.name == arg_name:
-                        continue    # promotion will automatically connect if the names match
-                    else:
-                        model_csdl.connect(arg.name, arg_name)  # If names don't match, connect manually
+                    model_csdl.connect(arg.operation.name+"."+arg.name, operation_name+"."+arg_name)  # Something like this for no promotions
+                    # if arg.name == arg_name:
+                    #     continue    # promotion will automatically connect if the names match
+                    # else:
+                    #     model_csdl.connect(arg.name, arg_name)  # If names don't match, connect manually
 
         self.csdl_model = model_csdl
         return self.csdl_model
