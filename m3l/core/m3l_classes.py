@@ -627,7 +627,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         '''
 
         output_name = f'evaluated_{self.function.name}'
-        output_shape = tuple(self.indexed_mesh[0][1].shape[:-1]) + (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1],)
+        output_shape = (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1], len(self.indexed_mesh))
 
         csdl_map = ModuleCSDL()
         points = csdl_map.create_output(output_name, output_shape)
@@ -661,7 +661,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         '''
         pass
 
-    def evaluate(self) -> tuple:
+    def evaluate(self):
         '''
         User-facing method that the user will call to define a model evaluation.
 
@@ -681,7 +681,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         # self.arguments = {'coefficients' : coefficients}
 
         # Create the M3L variables that are being output
-        output_shape = tuple(self.indexed_mesh[0][1].shape[:-1]) + (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1],)
+        output_shape = (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1], len(self.indexed_mesh))
 
         function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
         return function_values
