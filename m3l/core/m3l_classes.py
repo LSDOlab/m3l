@@ -8,6 +8,7 @@ import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
 from lsdo_modules.module.module import Module
 
+from m3l.core.csdl_operations import Eig, EigExplicit
 
 # @dataclass
 # class Node:
@@ -678,7 +679,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         self.name = f'{self.function.name}_evaluation'
 
         # Define operation arguments
-        # self.arguments = {'coefficients' : coefficients}
+        self.arguments = {}
 
         # Create the M3L variables that are being output
         output_shape = (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1], len(self.indexed_mesh))
@@ -818,3 +819,36 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.assemble()
 
         return self.csdl_model
+    
+    def assemble_modal(self) -> ModuleCSDL:
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations(output)
+        
+        model_csdl = ModuleCSDL()
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute_derivative()
+
+                if type(operation_csdl) is csdl.Model:
+                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                operation_csdl = operation.compute_derivative()
+                input = operation.residual_input
+                output = operation.residual_output
+
+        
+        model_csdl = ModuleCSDL()
+
+
