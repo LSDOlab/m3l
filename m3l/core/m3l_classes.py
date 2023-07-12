@@ -628,21 +628,21 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         '''
 
         output_name = f'evaluated_{self.function.name}'
-        output_shape = (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1], len(self.indexed_mesh))
-
+        output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
         csdl_map = ModuleCSDL()
-        points = csdl_map.create_output(output_name, output_shape)
+        points = csdl_map.create_output(output_name, shape=output_shape)
         index = 0
         for item in self.indexed_mesh:
-            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1])
+
+            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1]).toarray()
+
             map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map_{str(index)}', map)
             coefficients = self.function.coefficients[item[0]]
             num_coefficients = np.prod(coefficients.shape[:-1])
             function_coefficients = csdl_map.register_module_input(coefficients.name + str(index), shape=(num_coefficients, coefficients.shape[-1]),
                                                                 val=coefficients.value.reshape((-1, coefficients.shape[-1])))
             flattened_point = csdl.matmat(map_csdl, function_coefficients)
-            new_shape = output_shape
-            new_shape[0] = 1
+            new_shape = (1,output_shape[-1])
             point = csdl.reshape(flattened_point, new_shape=new_shape)
             points[index,:] = point
             index += 1
