@@ -635,7 +635,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         coefficients_csdl = {} # TODO: this will make new csdl variables for the coefficients each run. fix this.
         for key, coefficients in self.function.coefficients.items():
             num_coefficients = np.prod(coefficients.shape[:-1])
-            coefficients_csdl[key] = csdl_map.register_module_input(key + '_t_coefficients', shape=(num_coefficients, coefficients.shape[-1]),
+            coefficients_csdl[key] = csdl_map.register_module_input(key.replace(' ', '_').replace(',', '') + '_t_coefficients', shape=(num_coefficients, coefficients.shape[-1]),
                                                                 val=coefficients.value.reshape((-1, coefficients.shape[-1])))
         index = 0
         unique_keys = []
