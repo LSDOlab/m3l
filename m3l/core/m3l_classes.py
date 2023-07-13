@@ -631,22 +631,25 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
         csdl_map = ModuleCSDL()
         points = csdl_map.create_output(output_name, shape=output_shape)
-        index = 0
-        for item in self.indexed_mesh:
-
-            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1]).toarray()
-
-            map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map_{str(index)}', map)
-            coefficients = self.function.coefficients[item[0]]
+        
+        coefficients_csdl = {} # TODO: this will make new csdl variables for the coefficients each run. fix this.
+        for key, coefficients in self.function.coefficients.items():
             num_coefficients = np.prod(coefficients.shape[:-1])
-            function_coefficients = csdl_map.register_module_input(coefficients.name + str(index), shape=(num_coefficients, coefficients.shape[-1]),
+            coefficients_csdl[key] = csdl_map.register_module_input(key + '_t_coefficients', shape=(num_coefficients, coefficients.shape[-1]),
                                                                 val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+        index = 0
+        unique_keys = []
+        for item in self.indexed_mesh:
+            if not item[0] in unique_keys:
+                unique_keys.append(item[0])
+            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1]).toarray()
+            map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map_{str(index)}', map)
+            function_coefficients = coefficients_csdl[item[0]]
             flattened_point = csdl.matmat(map_csdl, function_coefficients)
             new_shape = (1,output_shape[-1])
             point = csdl.reshape(flattened_point, new_shape=new_shape)
             points[index,:] = point
             index += 1
-
         return csdl_map
 
     def compute_derivates(self):
