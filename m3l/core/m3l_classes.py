@@ -578,7 +578,7 @@ class IndexedFunction:
         function_evaluation_model = IndexedFunctionEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates)
         function_values = function_evaluation_model.evaluate()
         return function_values
-    def inverse_evaluate(self, function_values:Variable):
+    def inverse_evaluate(self, indexed_parametric_coordinates, function_values:Variable):
         '''
         Performs an inverse evaluation to set the coefficients of this function given an input of evaluated points over a mesh.
 
@@ -587,28 +587,64 @@ class IndexedFunction:
         function_values : FunctionValues
             A variable representing the evaluated function values.
         '''
-        # map = Perform B-spline fit and potentially some sort of conversion from extrinsic to intrinsic
-
-        # num_values = np.prod(function_values.mesh.shape[:-1])
-        num_values = np.prod(function_values.shape[:-1])
-        temp_map = np.eye(self.function_space.num_coefficients, num_values)
-
-        # csdl_map = csdl.Model()
-        csdl_map = ModuleCSDL()
-        function_values_csdl = csdl_map.register_module_input(function_values.name, shape=(num_values,3))
-        map_csdl = csdl_map.create_input(f'{self.name}_inverse_evaluation_map', temp_map)
-        function_coefficients_csdl = csdl.matmat(map_csdl, function_values_csdl)
-        csdl_map.register_output(f'{self.name}_coefficients', function_coefficients_csdl)
-
-        coefficients_shape = (temp_map.shape[0],3)
-        operation = CSDLOperation(name=f'{self.name}_inverse_evaluation', arguments=[function_values], operation_csdl=csdl_map)
-        function_coefficients = Variable(name=f'{self.name}_coefficients', shape=coefficients_shape, operation=operation)
-        return function_coefficients
+        # Perform B-spline fit 
+        function_evaluation_model = IndexedFunctionInverseEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates, function_values=function_values)
+        function_values = function_evaluation_model.evaluate()
+        return function_values
 
 class IndexedFunctionEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
         self.parameters.declare('function', types=IndexedFunction)
         self.parameters.declare('indexed_parametric_coordinates', types=list)
+
+    def assign_attributes(self):
+        '''
+        Assigns class attributes to make class more like standard python class.
+        '''
+        self.function = self.parameters['function']
+        self.indexed_mesh = self.parameters['indexed_parametric_coordinates']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+
+        output_name = f'evaluated_{self.function.name}'
+        output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
+        csdl_map = ModuleCSDL()
+        points = csdl_map.create_output(output_name, shape=output_shape)
+        
+        coefficients_csdl = {} # TODO: this will make new csdl variables for the coefficients each run. fix this.
+        for key, coefficients in self.function.coefficients.items():
+            num_coefficients = np.prod(coefficients.shape[:-1])
+            # name = key.replace(' ', '_').replace(',', '') + '_t_coefficients'
+            coefficients_csdl[key] = csdl_map.register_module_input(key, shape=(num_coefficients, coefficients.shape[-1]),
+                                                                val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+        index = 0
+        unique_keys = []
+        for item in self.indexed_mesh:
+            if not item[0] in unique_keys:
+                unique_keys.append(item[0])
+            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1]).toarray()
+            map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map_{str(index)}', map)
+            function_coefficients = coefficients_csdl[item[0]]
+            flattened_point = csdl.matmat(map_csdl, function_coefficients)
+            new_shape = (1,output_shape[-1])
+            point = csdl.reshape(flattened_point, new_shape=new_shape)
+            points[index,:] = point
+            index += 1
+        return csdl_map
+
+class IndexedFunctionInverseEvaluation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('function', types=IndexedFunction)
+        self.parameters.declare('indexed_parametric_coordinates', types=list)
+        self.parameters.declare('function_values')
 
     def assign_attributes(self):
         '''
@@ -855,3 +891,54 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         model_csdl = ModuleCSDL()
 
 
+class StructuralModalModel(Model):
+    def assemble(self):
+        # Assemble output states'output_jacobian_name'
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations(output)
+        
+        model_csdl = ModuleCSDL()
+        output_jacobian_names = []
+        output_jacobian_vars = []
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute()
+
+                if type(operation_csdl) is csdl.Model:
+                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                jacobian_csdl_model = operation.compute_derivatives()
+                if type(jacobian_csdl_model) is csdl.Model:
+                    model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
+                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                for key, value in operation.residual_partials.items():
+                    model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
+                    
+                    model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
+
+
+
+
+
+
+        self.csdl_model = model_csdl
+        return self.csdl_model

@@ -7,16 +7,14 @@ class Eig(csdl.Model):
     def initialize(self):
         # size and value of A
         self.parameters.declare('size')
-        self.parameters.declare('val')
 
     def define(self):
         # size and value of A
         size = self.parameters['size']
-        shape = (size, size)
-        val = self.parameters['val']
+
 
         # Create A matrix
-        A = self.create_input('A', val=val)
+        A = self.create_input('A', shape=(size,size))
 
         # custom operation insertion
         e_r, e_i = csdl.custom(A, op=EigExplicit(size=size))
