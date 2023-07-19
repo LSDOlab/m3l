@@ -622,8 +622,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         coefficients_csdl = {} # TODO: this will make new csdl variables for the coefficients each run. fix this.
         for key, coefficients in self.function.coefficients.items():
             num_coefficients = np.prod(coefficients.shape[:-1])
-            # name = key.replace(' ', '_').replace(',', '') + '_t_coefficients'
-            coefficients_csdl[key] = csdl_map.register_module_input(key, shape=(num_coefficients, coefficients.shape[-1]),
+            coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
                                                                 val=coefficients.value.reshape((-1, coefficients.shape[-1])))
         index = 0
         unique_keys = []
@@ -639,6 +638,45 @@ class IndexedFunctionEvaluation(ExplicitOperation):
             points[index,:] = point
             index += 1
         return csdl_map
+    
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self):
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        self.name = f'{self.function.name}_evaluation'
+
+        # Define operation arguments
+        self.arguments = {}
+
+        # Create the M3L variables that are being output
+        output_shape = (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1], len(self.indexed_mesh))
+
+        function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
+        return function_values
+    
 
 class IndexedFunctionInverseEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
