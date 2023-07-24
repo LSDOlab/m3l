@@ -595,6 +595,28 @@ class IndexedFunction:
         for key, value in self.coefficients.items():
             value.operation = inverse_operation
         return self.coefficients
+    
+    def compute(self, indexed_parametric_coordinates, coefficients):
+        associated_coords = {}
+        index = 0
+        for item in indexed_parametric_coordinates:
+            key = item[0]
+            value = item[1]
+            if key not in associated_coords.keys():
+                associated_coords[key] = [[index], value]
+            else:
+                associated_coords[key][0].append(index)
+                associated_coords[key] = [associated_coords[key][0], np.vstack((associated_coords[key][1], value))]
+            index += 1
+
+        output_shape = (len(indexed_parametric_coordinates), coefficients[indexed_parametric_coordinates[0][0]].shape[-1])
+
+        evaluated_points = np.zeros(output_shape)
+        for key, value in associated_coords.items(): # in the future, use submodels from the function spaces?
+            evaluation_matrix = self.space.spaces[key].compute_evaluation_map(value[1])
+            evaluated_points[value[0],:] = evaluation_matrix.dot(coefficients[key].reshape((-1, coefficients[key].shape[-1])))
+        return evaluated_points
+
 
 class IndexedFunctionEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
@@ -721,7 +743,7 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
         function_values = csdl_model.register_module_input('function_values', shape=output_shape)
 
 
-        for key, value in associated_coords.items(): # in the future, use submodels from the function spaces
+        for key, value in associated_coords.items(): # in the future, use submodels from the function spaces?
             evaluation_matrix = self.function.space.spaces[key].compute_evaluation_map(value[1])
             fitting_matrix = linalg.pinv(evaluation_matrix.toarray())
             fitting_matrix_csdl = csdl_model.register_module_input('fitting_matrix_'+key, val=fitting_matrix, shape = fitting_matrix.shape, computed_upstream=False)
@@ -761,7 +783,7 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
         function_values : Variable
             The values of the function at the mesh locations.
         '''
-        self.name = f'{self.function.name}_evaluation'
+        self.name = f'{self.function.name}_inverse_evaluation'
 
         # Define operation arguments
         self.arguments = {'function_values':function_values}
@@ -878,7 +900,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         model_csdl = ModuleCSDL()
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
 
