@@ -816,7 +816,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
 
-    def register_output(self, output:Variable, design_condition=None):
+    def register_output(self, output:Variable):
         '''
         Registers a state to the model group so the model group will compute and output this variable.
         If inverse_evaluate is called on a variable that already has a value, the residual is identified
@@ -827,22 +827,11 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         output : Variable
             The variable that the model will output.
         '''
-        if design_condition:
-            prepend = design_condition.parameters['name']
-        else:
-            prepend = ''
-
         if isinstance(output, dict):
             for key, value in output.items():
-                name = f'{prepend}{value.name}'
-                self.outputs[name] = value
-        elif  isinstance(output, list):
-            for out in output:
-                name = f'{prepend}{out.name}'
-                self.outputs[name] = out
+                self.outputs[value.name] = value
         elif type(output) is Variable:
-            name = f'{prepend}{output.name}'
-            self.outputs[name] = output
+            self.outputs[output.name] = output
         else:
             print(type(output))
             raise NotImplementedError
@@ -880,8 +869,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
             if operation.name not in self.operations:
                 self.operations[operation.name] = operation
-            else:
-                pass
 
 
     # def assemble(self):
@@ -915,10 +902,11 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # Assemble output states
         for output_name, output in self.outputs.items():
             self.gather_operations(output)
+        
         model_csdl = ModuleCSDL()
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-            # print(operation_name)
+
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
 
@@ -927,7 +915,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 elif issubclass(type(operation_csdl), ModuleCSDL):
                     model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
-                    print(type(operation_csdl))
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
                 for input_name, input in operation.arguments.items():
@@ -941,6 +928,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
     def assemble_csdl(self) -> ModuleCSDL:
         self.assemble()
+
+        return self.csdl_model
 
     
     def assemble_modal(self) -> ModuleCSDL:
