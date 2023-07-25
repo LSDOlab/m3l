@@ -648,8 +648,11 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         coefficients_csdl = {} # TODO: this will make new csdl variables for the coefficients each evaluate. fix this.
         for key, coefficients in self.function.coefficients.items():
             num_coefficients = np.prod(coefficients.shape[:-1])
-            coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
-                                                                val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+            if coefficients.value is None:
+                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
+            else:
+                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+                                                                    val=coefficients.value.reshape((-1, coefficients.shape[-1])))
         index = 0
         unique_keys = []
         for item in self.indexed_mesh:
@@ -695,7 +698,10 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         self.name = f'{self.function.name}_evaluation'
 
         # Define operation arguments
-        self.arguments = self.function.coefficients
+        self.arguments = {}
+        for value in self.function.coefficients.values():
+            self.arguments[value.name] = value
+        # self.arguments = self.function.coefficients
 
         # Create the M3L variables that are being output
         output_shape = (self.function.coefficients[self.indexed_mesh[0][0]].shape[-1], len(self.indexed_mesh))
