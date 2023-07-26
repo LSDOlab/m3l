@@ -234,17 +234,17 @@ class VStack(ExplicitOperation):
         '''
         x1 = self.arguments['x1']
         x2 = self.arguments['x2']
-        shape = x1.shape
-        shape[0] = x2.shape[0]
-
+        # shape = x1.shape
+        # shape[0] = x2.shape[0]
+        shape = self.shape
+        output_name = f'{x1.name}_stack_{x2.name}'
         operation_csdl = csdl.Model()
         x1_csdl = operation_csdl.declare_variable(name='x1', shape=x1.shape)
         x2_csdl = operation_csdl.declare_variable(name='x2', shape=x2.shape)
-        y = operation_csdl.create_output('y', shape=shape)
-        y[0:x1.shape[0],:] = x1
-        y[x1.shape[0]:-1,:] = x2
-        output_name = f'{x1.name}_stack_{x2.name}'
-        operation_csdl.register_output(name=output_name, var=y)
+        y = operation_csdl.create_output(name=output_name, shape=shape)
+        y[0:x1.shape[0],:] = x1_csdl
+        y[x1.shape[0]:,:] = x2_csdl
+        # operation_csdl.register_output(name=output_name, var=y)
         return operation_csdl
 
     def compute_derivates(self):
@@ -260,7 +260,7 @@ class VStack(ExplicitOperation):
         '''
         pass
 
-    def evaluate(self, x1:Variable, x2:Variable) -> Variable:
+    def evaluate(self, x1:Variable, x2:Variable, design_condition=None) -> Variable:
         '''
         User-facing method that the user will call to define a model evaluation.
 
@@ -274,15 +274,21 @@ class VStack(ExplicitOperation):
         function_values : Variable
             The values of the function at the mesh locations.
         '''
-        self.name = f'{x1.name}_stack_{x2.name}_operation'
+        if design_condition:
+            dc_name = design_condition.parameters['name']
+            self.name = f'{dc_name}_{x1.name}_stack_{x2.name}_operation'
+        else:
+            self.name = f'{x1.name}_stack_{x2.name}_operation'
 
         # Define operation arguments
         self.arguments = {'x1' : x1, 'x2' : x2}
-        shape = x1.shape
-        shape[0] = x2.shape[0]
+        # shape = x1.shape
+        # shape[0] = x2.shape[0]
 
+        self.shape = (x1.shape[0] + x2.shape[0], ) + x1.shape[1:]
+        # exit(shape)
         # Create the M3L variables that are being output
-        function_values = Variable(name=f'{x1.name}_plus_{x2.name}', shape=shape, operation=self)
+        function_values = Variable(name=f'{x1.name}_stack_{x2.name}', shape=self.shape, operation=self)
         return function_values
 
 class Add(ExplicitOperation):
@@ -816,7 +822,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
 
-    def register_output(self, output:Variable):
+    def register_output(self, output:Variable, design_condition=None):
         '''
         Registers a state to the model group so the model group will compute and output this variable.
         If inverse_evaluate is called on a variable that already has a value, the residual is identified
@@ -827,11 +833,22 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         output : Variable
             The variable that the model will output.
         '''
+        if design_condition:
+            prepend = design_condition.parameters['name']
+        else:
+            prepend = ''
+
         if isinstance(output, dict):
             for key, value in output.items():
-                self.outputs[value.name] = value
+                name = f'{prepend}{value.name}'
+                self.outputs[name] = value
+        elif  isinstance(output, list):
+            for out in output:
+                name = f'{prepend}{out.name}'
+                self.outputs[name] = out
         elif type(output) is Variable:
-            self.outputs[output.name] = output
+            name = f'{prepend}{output.name}'
+            self.outputs[name] = output
         else:
             print(type(output))
             raise NotImplementedError

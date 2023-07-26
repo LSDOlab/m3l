@@ -10,7 +10,6 @@ from scipy.spatial.distance import cdist
 class IDWFunctionSpace(FunctionSpace):
     name : str
     points : np.ndarray
-    dim : int
     order : float
     coefficients_shape : tuple
 
