@@ -17,6 +17,12 @@ class IDWFunctionSpace(FunctionSpace):
         dist = cdist(self.points, parametric_coordinates)
         weights = 1.0/dist**self.order
         weights /= weights.sum(axis=0)
+        np.nan_to_num(weights, copy=False, nan=1.)
         return weights.T
 
-
+    def compute_fitting_map(self, parametric_coordinates:np.ndarray):
+        dist = cdist(parametric_coordinates, self.points)
+        weights = 1.0/dist**self.order
+        weights /= weights.sum(axis=0)
+        np.nan_to_num(weights, copy=False, nan=1.)
+        return weights.T

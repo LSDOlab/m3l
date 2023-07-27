@@ -620,6 +620,7 @@ class IndexedFunction:
         evaluated_points = np.zeros(output_shape)
         for key, value in associated_coords.items(): # in the future, use submodels from the function spaces?
             evaluation_matrix = self.space.spaces[key].compute_evaluation_map(value[1])
+            print(evaluation_matrix)
             evaluated_points[value[0],:] = evaluation_matrix.dot(coefficients[key].reshape((-1, coefficients[key].shape[-1])))
         return evaluated_points
 
@@ -664,7 +665,9 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         for item in self.indexed_mesh:
             if not item[0] in unique_keys:
                 unique_keys.append(item[0])
-            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1]).toarray()
+            map = self.function.space.spaces[item[0]].compute_evaluation_map(item[1])
+            if sps.issparse(map):
+                map = map.toarray()
             map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map_{str(index)}', map)
             function_coefficients = coefficients_csdl[item[0]]
             flattened_point = csdl.matmat(map_csdl, function_coefficients)
@@ -752,12 +755,16 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
 
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
         csdl_model = ModuleCSDL()
-        function_values = csdl_model.register_module_input('function_values', shape=output_shape)
-
-
+        function_values = csdl_model.register_module_input('function_values', shape=self.arguments['function_values'].shape)
+        function_values = csdl.reshape(function_values, output_shape)
         for key, value in associated_coords.items(): # in the future, use submodels from the function spaces?
-            evaluation_matrix = self.function.space.spaces[key].compute_evaluation_map(value[1])
-            fitting_matrix = linalg.pinv(evaluation_matrix.toarray())
+            if hasattr(self.function.space.spaces[key], 'compute_fitting_map'):
+                fitting_matrix = self.function.space.spaces[key].compute_fitting_map(value[1])
+            else:
+                evaluation_matrix = self.function.space.spaces[key].compute_evaluation_map(value[1])
+                if sps.issparse(evaluation_matrix):
+                    evaluation_matrix = evaluation_matrix.toarray()
+                fitting_matrix = linalg.pinv(evaluation_matrix)
             fitting_matrix_csdl = csdl_model.register_module_input('fitting_matrix_'+key, val=fitting_matrix, shape = fitting_matrix.shape, computed_upstream=False)
             associated_function_values = csdl_model.create_output(name = key + '_fn_values', shape=(len(value[0]), output_shape[-1]))
             for i in range(len(value[0])):
