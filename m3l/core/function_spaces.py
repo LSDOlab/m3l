@@ -7,7 +7,7 @@ from scipy.spatial.distance import cdist
 
 
 @dataclass
-class IDWFunctionSpace(FunctionSpace):
+class IDWFunctionSpace(FunctionSpace): # this is a bit of a hack I guess
     name : str
     points : np.ndarray
     order : float
@@ -16,13 +16,15 @@ class IDWFunctionSpace(FunctionSpace):
     def compute_evaluation_map(self, parametric_coordinates:np.ndarray):
         dist = cdist(self.points, parametric_coordinates)
         weights = 1.0/dist**self.order
+        weights = weights.T
         weights /= weights.sum(axis=0)
-        np.nan_to_num(weights, copy=False, nan=1.)
-        return weights.T
+        np.nan_to_num(weights, copy=False, nan=1.) # maybe do another weights /= weights.sum(axis=0) after this
+        return weights
 
     def compute_fitting_map(self, parametric_coordinates:np.ndarray):
         dist = cdist(parametric_coordinates, self.points)
         weights = 1.0/dist**self.order
+        weights = weights.T
         weights /= weights.sum(axis=0)
         np.nan_to_num(weights, copy=False, nan=1.)
-        return weights.T
+        return weights

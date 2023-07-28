@@ -620,7 +620,6 @@ class IndexedFunction:
         evaluated_points = np.zeros(output_shape)
         for key, value in associated_coords.items(): # in the future, use submodels from the function spaces?
             evaluation_matrix = self.space.spaces[key].compute_evaluation_map(value[1])
-            print(evaluation_matrix)
             evaluated_points[value[0],:] = evaluation_matrix.dot(coefficients[key].reshape((-1, coefficients[key].shape[-1])))
         return evaluated_points
 
