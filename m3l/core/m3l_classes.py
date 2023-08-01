@@ -242,8 +242,17 @@ class VStack(ExplicitOperation):
         x1_csdl = operation_csdl.declare_variable(name='x1', shape=x1.shape)
         x2_csdl = operation_csdl.declare_variable(name='x2', shape=x2.shape)
         y = operation_csdl.create_output(name=output_name, shape=shape)
-        y[0:x1.shape[0],:] = x1_csdl
-        y[x1.shape[0]:,:] = x2_csdl
+        if len(shape) == 1:
+            y[0:x1.shape[0]] = x1_csdl
+            y[x1.shape[0]:] = x2_csdl
+        elif len(shape) == 2:
+            y[0:x1.shape[0],:] = x1_csdl
+            y[x1.shape[0]:,:] = x2_csdl
+        elif len(shape) == 3:
+            y[0:x1.shape[0],:,:] = x1_csdl
+            y[x1.shape[0]:,:,:] = x2_csdl
+        else:
+            raise Exception('VStack not implemented for tensors of dim 4 or greator')
         # operation_csdl.register_output(name=output_name, var=y)
         return operation_csdl
 
