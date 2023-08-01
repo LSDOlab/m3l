@@ -602,6 +602,11 @@ class IndexedFunction:
             value.operation = inverse_operation
         return self.coefficients
     
+    def evaluate_normals(self, indexed_parametric_coordinates):
+        function_evaluation_model = IndexedFunctionNormalEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates)
+        function_values = function_evaluation_model.evaluate()
+        return function_values
+    
     def compute(self, indexed_parametric_coordinates, coefficients):
         associated_coords = {}
         index = 0
@@ -744,6 +749,122 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
         return function_values
     
+
+class IndexedFunctionNormalEvaluation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('function', types=IndexedFunction)
+        self.parameters.declare('indexed_parametric_coordinates', types=list)
+
+    def assign_attributes(self):
+        '''
+        Assigns class attributes to make class more like standard python class.
+        '''
+        self.function = self.parameters['function']
+        self.indexed_mesh = self.parameters['indexed_parametric_coordinates']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+
+        associated_coords = {}
+        index = 0
+        for item in self.indexed_mesh:
+            key = item[0]
+            value = item[1]
+            if key not in associated_coords.keys():
+                associated_coords[key] = [[index], value]
+            else:
+                associated_coords[key][0].append(index)
+                associated_coords[key] = [associated_coords[key][0], np.vstack((associated_coords[key][1], value))]
+            index += 1
+
+        output_name = f'evaluated_normal_{self.function.name}'
+        output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
+        csdl_map = ModuleCSDL()
+        points = csdl_map.create_output(output_name, shape=output_shape)
+        
+        coefficients_csdl = {} 
+        for key, coefficients in self.function.coefficients.items():
+            num_coefficients = np.prod(coefficients.shape[:-1])
+            if coefficients.value is None:
+                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
+            else:
+                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+                                                                    val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+
+        for key, value in associated_coords.items():
+            evaluation_matrix_u = self.function.space.spaces[key].compute_evaluation_map(value[1], parametric_derivative_order=(1,0))
+            evaluation_matrix_v = self.function.space.spaces[key].compute_evaluation_map(value[1], parametric_derivative_order=(0,1))
+            if sps.issparse(evaluation_matrix_u):
+                evaluation_matrix_u = evaluation_matrix_u.toarray()
+                evaluation_matrix_v = evaluation_matrix_v.toarray()
+
+            evaluation_matrix_u_csdl = csdl_map.register_module_input('evaluation_matrix_u_'+key, val=evaluation_matrix_u, shape = evaluation_matrix_u.shape, computed_upstream=False)
+            evaluation_matrix_v_csdl = csdl_map.register_module_input('evaluation_matrix_v_'+key, val=evaluation_matrix_v, shape = evaluation_matrix_v.shape, computed_upstream=False)
+
+            associated_u_function_values = csdl.matmat(evaluation_matrix_u_csdl, coefficients_csdl[key])
+            associated_v_function_values = csdl.matmat(evaluation_matrix_v_csdl, coefficients_csdl[key])
+
+            normals = csdl.cross(associated_u_function_values, associated_v_function_values, axis=1)
+            normals = normals / csdl.expand(csdl.pnorm(normals, axis=1), normals.shape, 'i->ij')
+
+            for i in range(len(value[0])):
+                points[value[0][i],:] = normals[i,:]
+
+        return csdl_map
+    
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self):
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        self.name = f'{self.function.name}_normal_evaluation'
+
+        # Define operation arguments
+        surface_names = []
+        for item in self.indexed_mesh:
+            name = item[0]
+            if not name in surface_names:
+                surface_names.append(name)
+        self.arguments = {}
+        coefficients = self.function.coefficients
+        for name in surface_names:
+            self.arguments[coefficients[name].name] = coefficients[name]
+        # self.arguments = self.function.coefficients
+
+        # Create the M3L variables that are being output
+        output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
+
+        function_values = Variable(name=f'evaluated_normal_{self.function.name}', shape=output_shape, operation=self)
+        return function_values
 
 class IndexedFunctionInverseEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
@@ -962,7 +1083,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         model_csdl = ModuleCSDL()
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
 
