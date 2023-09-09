@@ -611,8 +611,8 @@ class IndexedFunction:
             value.operation = inverse_operation
         return self.coefficients
     
-    def evaluate_normals(self, indexed_parametric_coordinates):
-        function_evaluation_model = IndexedFunctionNormalEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates)
+    def evaluate_normals(self, indexed_parametric_coordinates, name:str=None):
+        function_evaluation_model = IndexedFunctionNormalEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates, name=name)
         function_values = function_evaluation_model.evaluate()
         return function_values
     
@@ -763,6 +763,7 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
         self.parameters.declare('function', types=IndexedFunction)
         self.parameters.declare('indexed_parametric_coordinates', types=list)
+        self.parameters.declare('name', types=str, allow_none=True)
 
     def assign_attributes(self):
         '''
@@ -770,6 +771,7 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
         '''
         self.function = self.parameters['function']
         self.indexed_mesh = self.parameters['indexed_parametric_coordinates']
+        self.input_name = self.parameters['name']
     
     def compute(self):
         '''
@@ -794,6 +796,8 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
             index += 1
 
         output_name = f'evaluated_normal_{self.function.name}'
+        if not self.input_name is None:
+            output_name = output_name + '_' + self.input_name
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
         csdl_map = ModuleCSDL()
         points = csdl_map.create_output(output_name, shape=output_shape)
@@ -855,7 +859,10 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
         function_values : Variable
             The values of the function at the mesh locations.
         '''
-        self.name = f'{self.function.name}_normal_evaluation'
+        if self.input_name is not None:
+            self.name = f'{self.function.name}_normal_evaluation_' + self.input_name
+        else:
+            self.name = f'{self.function.name}_normal_evaluation'
 
         # Define operation arguments
         surface_names = []
@@ -872,7 +879,11 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
         # Create the M3L variables that are being output
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
 
-        function_values = Variable(name=f'evaluated_normal_{self.function.name}', shape=output_shape, operation=self)
+        output_name = f'evaluated_normal_{self.function.name}'
+        if not self.input_name is None:
+            output_name = output_name + '_' + self.input_name
+
+        function_values = Variable(name=output_name, shape=output_shape, operation=self)
         return function_values
 
 class IndexedFunctionInverseEvaluation(ExplicitOperation):
