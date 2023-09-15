@@ -9,6 +9,8 @@ import array_mapper as am
 import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
 from lsdo_modules.module.module import Module
+from typing import Union
+import m3l
 
 from m3l.core.csdl_operations import Eig, EigExplicit
 
@@ -63,6 +65,7 @@ class CSDLOperation(Operation):
 
 
 class ExplicitOperation(Operation):
+    m3l_inputs = []
 
     def assign_attributes(self):
         '''
@@ -110,6 +113,50 @@ class ExplicitOperation(Operation):
         pass
         # NOTE to solver developers: I recommend looking at an example such as aframe.
 
+    def create_input(self, name: str, val: Union[int, float, np.ndarray], shape: tuple,
+                     prefix: str = '', dv_flag: bool = False,
+                     upper: Union[int, float, np.ndarray, None] = None,
+                     lower: Union[int, float, np.ndarray, None] = None,
+                     scaler: Union[int, float] = None) -> m3l.Variable:
+        """
+        Method to create M3L variables and specify design variables.
+
+        Parameters:
+        ----------
+        name : str
+            Name of the variable.
+        val : int, float, or np.ndarray
+            Value of the m3l variable.
+        shape : tuple
+            Shape of the variable specified as a tuple.
+        prefix : str, optional
+            Optional variable prefix. Recommended to create a unique namespace for variables of the same kind.
+        dv_flag : bool, optional, default: False
+            Specify whether a certain variable is a design variable for optimization.
+        upper : int, float, np.ndarray, or None, optional, default: None
+            Set an upper bound on a design variable.
+        lower : int, float, np.ndarray, or None, optional, default: None
+            Set a lower bound on a design variable.
+        scaler : int or float, optional
+            Scale design variables.
+        
+        Returns:
+        -------
+        m3l.Variable
+            An instance of an M3L Variable.
+        """
+
+
+        m3l_var = m3l.Variable(
+            name=name,
+            value=val,
+            shape=shape,
+            operation=self,
+        )
+
+        self.m3l_inputs.append(m3l_var)
+
+        return m3l_var
 
 class ImplicitOperation(Operation):
     
@@ -918,13 +965,14 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
 
     def gather_operations(self, variable:Variable):
-        if variable.operation is not None:
-            operation = variable.operation
-            for input_name, input in operation.arguments.items():
-                self.gather_operations(input)
+        if variable:
+            if variable.operation is not None:
+                operation = variable.operation
+                for input_name, input in operation.arguments.items():
+                    self.gather_operations(input)
 
-            if operation.name not in self.operations:
-                self.operations[operation.name] = operation
+                if operation.name not in self.operations:
+                    self.operations[operation.name] = operation
 
 
     # def assemble(self):
@@ -974,8 +1022,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
                 for input_name, input in operation.arguments.items():
-                    if input.operation is not None:
-                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                    if input:
+                        if input.operation is not None:
+                            model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
 
 
         self.csdl_model = model_csdl
