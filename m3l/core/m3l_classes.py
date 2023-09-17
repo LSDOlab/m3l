@@ -10,7 +10,7 @@ import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
 from lsdo_modules.module.module import Module
 from typing import Union
-import m3l
+from m3l.utils.base_class import OperationBase
 
 from m3l.core.csdl_operations import Eig, EigExplicit
 
@@ -37,7 +37,7 @@ from m3l.core.csdl_operations import Eig, EigExplicit
 #     arguments : dict
 
 
-class Operation(Module):
+class Operation(OperationBase):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -65,12 +65,16 @@ class CSDLOperation(Operation):
 
 
 class ExplicitOperation(Operation):
-    m3l_inputs = []
+    def initialize(self, kwargs):
+        self.parameters.declare('name', types=str)
+
 
     def assign_attributes(self):
         '''
         Assigns class attributes to make class more like standard python class.
         '''
+        self.m3l_inputs = []
+        self.name = self.parameters['name']
         pass
     
     def compute(self):
@@ -117,7 +121,7 @@ class ExplicitOperation(Operation):
                      prefix: str = '', dv_flag: bool = False,
                      upper: Union[int, float, np.ndarray, None] = None,
                      lower: Union[int, float, np.ndarray, None] = None,
-                     scaler: Union[int, float] = None) -> m3l.Variable:
+                     scaler: Union[int, float] = None):
         """
         Method to create M3L variables and specify design variables.
 
@@ -146,9 +150,17 @@ class ExplicitOperation(Operation):
             An instance of an M3L Variable.
         """
 
+        operation_name = self.name
 
-        m3l_var = m3l.Variable(
-            name=name,
+
+        for var in self.m3l_inputs:
+            existing_name = var.name
+            if f"{operation_name}_{name}" == existing_name:
+                raise ValueError(f"Variable '{name}' already exists for operation '{operation_name}'. Please use a uniqe name.") 
+
+        
+        m3l_var = Variable(
+            name=f"{operation_name}_{name}",
             value=val,
             shape=shape,
             operation=self,
@@ -245,6 +257,10 @@ class Variable:
     shape : tuple
     operation : Operation = None
     value : np.ndarray = None
+    dv_flag : bool = False
+    lower : Union[int, float, np.ndarray, None] = None
+    upper : Union[int, float, np.ndarray, None] = None
+    scaler : Union[int, float, None] = None
 
     def __add__(self, other):
         import m3l
@@ -1005,11 +1021,30 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     def assemble(self):
         # Assemble output states
         for output_name, output in self.outputs.items():
+            print(f"{output_name}: ", output)
             self.gather_operations(output)
         
         model_csdl = ModuleCSDL()
 
+        # print(self.operations.items())
+
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            
+            # print(operation.m3l_inputs)
+            for var in operation.m3l_inputs:
+                var_name = var.name
+                var_val = var.value
+                var_shape = var.shape
+                dv_flag = var.dv_flag
+
+                model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
+
+                if dv_flag:
+                    lower = var.lower
+                    upper = var.upper
+                    scaler = var.scaler
+                    model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+
 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
