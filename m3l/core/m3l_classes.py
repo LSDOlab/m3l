@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass, asdict, field
 from typing import Any, List
 
 import numpy as np
@@ -117,7 +117,7 @@ class ExplicitOperation(Operation):
         pass
         # NOTE to solver developers: I recommend looking at an example such as aframe.
 
-    def create_input(self, name: str, val: Union[int, float, np.ndarray], shape: tuple,
+    def create_input(self, name: str, val: Union[int, float, np.ndarray], shape: Union[tuple, None] = None,
                      prefix: str = '', dv_flag: bool = False,
                      upper: Union[int, float, np.ndarray, None] = None,
                      lower: Union[int, float, np.ndarray, None] = None,
@@ -131,7 +131,7 @@ class ExplicitOperation(Operation):
             Name of the variable.
         val : int, float, or np.ndarray
             Value of the m3l variable.
-        shape : tuple
+        shape : tuple, None optional (default: None)
             Shape of the variable specified as a tuple.
         prefix : str, optional
             Optional variable prefix. Recommended to create a unique namespace for variables of the same kind.
@@ -159,11 +159,22 @@ class ExplicitOperation(Operation):
                 raise ValueError(f"Variable '{name}' already exists for operation '{operation_name}'. Please use a uniqe name.") 
 
         
+        if shape:
+            pass
+        else:
+            if isinstance(val, (int, float)):
+                shape = (1, )
+            elif isinstance(val, np.ndarray):
+                shape = val.shape
+            else:
+                raise TypeError('Invalid type for value. Must be int, float or np.ndarray')
+
         m3l_var = Variable(
             name=f"{operation_name}_{name}",
             value=val,
             shape=shape,
             operation=self,
+            input_flag=True,
         )
 
         self.m3l_inputs.append(m3l_var)
@@ -257,6 +268,7 @@ class Variable:
     shape : tuple
     operation : Operation = None
     value : np.ndarray = None
+    input_flag : bool = False
     dv_flag : bool = False
     lower : Union[int, float, np.ndarray, None] = None
     upper : Union[int, float, np.ndarray, None] = None
@@ -942,19 +954,24 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         if isinstance(output, dict):
             for key, value in output.items():
-                name = f'{prepend}{value.name}'
+                name = f'{prepend}_{value.name}'
                 self.outputs[name] = value
         elif  isinstance(output, list):
             for out in output:
-                name = f'{prepend}{out.name}'
+                name = f'{prepend}_{out.name}'
                 self.outputs[name] = out
         elif type(output) is Variable:
-            name = f'{prepend}{output.name}'
+            name = f'{prepend}_{output.name}'
             self.outputs[name] = output
+        elif is_dataclass(output):
+            # attributes = asdict(output)
+            attributes = output.__dict__
+            for key, value in attributes.items():
+                name = f'{prepend}{key}'
+                self.outputs[name] = value
         else:
             print(type(output))
             raise NotImplementedError
-        # self.outputs[output.name] = output
 
 
     def set_linear_solver(self, linear_solver:csdl.Solver):
@@ -984,11 +1001,20 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         if variable:
             if variable.operation is not None:
                 operation = variable.operation
+                # print(operation.arguments.items())
+                
+
                 for input_name, input in operation.arguments.items():
-                    self.gather_operations(input)
+                    if input is not None:
+                        if input.input_flag:
+                            pass
+                        else:
+                            self.gather_operations(input)
 
                 if operation.name not in self.operations:
                     self.operations[operation.name] = operation
+            else:
+                print(f'Variable {variable.operation} is not part of an operation')
 
 
     # def assemble(self):
@@ -1019,18 +1045,22 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     
 
     def assemble(self):
+        
+        # print(self.outputs.items())
+        # exit()
         # Assemble output states
         for output_name, output in self.outputs.items():
             print(f"{output_name}: ", output)
             self.gather_operations(output)
         
-        model_csdl = ModuleCSDL()
+        model_csdl = csdl.Model()
 
-        # print(self.operations.items())
+        print(self.operations)
+        print(self.operations.items())
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
             
-            # print(operation.m3l_inputs)
+            print(operation.m3l_inputs)
             for var in operation.m3l_inputs:
                 var_name = var.name
                 var_val = var.value
@@ -1046,15 +1076,17 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
 
 
+
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
-
-                if type(operation_csdl) is csdl.Model:
+                print('\n')
+                print(operation_name)
+                if issubclass(type(operation_csdl), csdl.Model):
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 elif issubclass(type(operation_csdl), ModuleCSDL):
                     model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
-                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
 
                 for input_name, input in operation.arguments.items():
                     if input:
