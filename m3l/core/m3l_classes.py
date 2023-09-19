@@ -37,7 +37,7 @@ from m3l.core.csdl_operations import Eig, EigExplicit
 #     arguments : dict
 
 
-class Operation(OperationBase):
+class Operation(Module):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -74,7 +74,7 @@ class ExplicitOperation(Operation):
         Assigns class attributes to make class more like standard python class.
         '''
         self.m3l_inputs = []
-        self.name = self.parameters['name']
+        # self.name = self.parameters['name']
         pass
     
     def compute(self):
