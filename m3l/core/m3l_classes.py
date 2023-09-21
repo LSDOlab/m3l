@@ -117,81 +117,6 @@ class ExplicitOperation(Operation):
         pass
         # NOTE to solver developers: I recommend looking at an example such as aframe.
 
-    def create_input(self, name: str, val: Union[int, float, np.ndarray], shape: Union[tuple, None] = None,
-                     prefix: str = '', dv_flag: bool = False,
-                     upper: Union[int, float, np.ndarray, None] = None,
-                     lower: Union[int, float, np.ndarray, None] = None,
-                     scaler: Union[int, float] = None):
-        """
-        Method to create M3L variables and specify design variables.
-
-        Parameters:
-        ----------
-        name : str
-            Name of the variable.
-        
-        val : int, float, or np.ndarray
-            Value of the m3l variable.
-        
-        shape : tuple, None optional (default: None)
-            Shape of the variable specified as a tuple.
-        
-        prefix : str, optional
-            Optional variable prefix. Recommended to create a unique namespace for variables of the same kind.
-        
-        dv_flag : bool, optional, default: False
-            Specify whether a certain variable is a design variable for optimization.
-        
-        upper : int, float, np.ndarray, or None, optional, default: None
-            Set an upper bound on a design variable.
-        
-        lower : int, float, np.ndarray, or None, optional, default: None
-            Set a lower bound on a design variable.
-        
-        scaler : int or float, optional
-            Scale design variables.
-        
-        Returns:
-        -------
-        m3l.Variable
-            An instance of an M3L Variable.
-        """
-
-        operation_name = self.name
-
-
-        for var in self.m3l_inputs:
-            existing_name = var.name
-            if f"{operation_name}_{name}" == existing_name:
-                raise ValueError(f"Variable '{name}' already exists for operation '{operation_name}'. Please use a uniqe name.") 
-
-        
-        if shape:
-            pass
-        else:
-            if isinstance(val, (int, float)):
-                shape = (1, )
-            elif isinstance(val, np.ndarray):
-                shape = val.shape
-            else:
-                raise TypeError('Invalid type for value. Must be int, float or np.ndarray')
-
-        m3l_var = Variable(
-            name=f"{operation_name}_{name}",
-            value=val,
-            shape=shape,
-            operation=None,
-            dv_flag=dv_flag,
-            upper=upper, 
-            lower=lower,
-            scaler=scaler,
-        )
-
-        self.m3l_inputs.append(m3l_var)
-
-        return m3l_var
-
-    
 
 
 
@@ -288,7 +213,6 @@ class Variable:
     upper : Union[int, float, np.ndarray, None] = None
     scaler : Union[int, float, None] = None
     equals : Union[int, float, np.ndarray, None] = None
-    scaler : Union[int, float, np.ndarray, None] = None
 
     def __add__(self, other):
         import m3l
@@ -950,9 +874,93 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.parameters = None
         self.constraints = []
         self.objective = None
+        self.user_inputs = []
 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
+
+    def create_input(self, name: str, val: Union[int, float, np.ndarray], shape: Union[tuple, None] = None,
+                     prefix: str = '', dv_flag: bool = False,
+                     upper: Union[int, float, np.ndarray, None] = None,
+                     lower: Union[int, float, np.ndarray, None] = None,
+                     scaler: Union[int, float] = None):
+        """
+        Method to create M3L variables and specify design variables.
+
+        Parameters:
+        ----------
+        name : str
+            Name of the variable.
+        
+        val : int, float, or np.ndarray
+            Value of the m3l variable.
+        
+        shape : tuple, None optional (default: None)
+            Shape of the variable specified as a tuple.
+        
+        prefix : str, optional
+            Optional variable prefix. Recommended to create a unique namespace for variables of the same kind.
+        
+        dv_flag : bool, optional, default: False
+            Specify whether a certain variable is a design variable for optimization.
+        
+        upper : int, float, np.ndarray, or None, optional, default: None
+            Set an upper bound on a design variable.
+        
+        lower : int, float, np.ndarray, or None, optional, default: None
+            Set a lower bound on a design variable.
+        
+        scaler : int or float, optional
+            Scale design variables.
+        
+        Returns:
+        -------
+        m3l.Variable
+            An instance of an M3L Variable.
+        """
+
+        # operation_name = self.name
+
+
+        # for var in self.m3l_inputs:
+        #     existing_name = var.name
+        #     if f"{operation_name}_{name}" == existing_name:
+        #         raise ValueError(f"Variable '{name}' already exists for operation '{operation_name}'. Please use a uniqe name.") 
+
+        for user_input in self.user_inputs:
+            if name == user_input.name:
+                raise ValueError(f"Variable '{name}' alredy exists as an input. Please make sure to give each m3l input variable a unique name.")
+        
+        if not isinstance(val, (int, float, np.ndarray)):
+            raise TypeError('Invalid type for value. Must be int, float or np.ndarray')
+
+        if shape:
+            var_shape = shape
+        else:
+            if isinstance(val, (int, float)):
+                var_shape = (1, )
+            elif isinstance(val, np.ndarray):
+                var_shape = val.shape
+            else:
+                raise NotImplementedError
+
+        m3l_var = Variable(
+            # name=f"{operation_name}_{name}",
+            name=name,
+            value=val,
+            shape=var_shape,
+            operation=None,
+            dv_flag=dv_flag,
+            upper=upper, 
+            lower=lower,
+            scaler=scaler,
+        )
+
+        # self.m3l_inputs.append(m3l_var)
+        self.user_inputs.append(m3l_var)
+
+        return m3l_var
+
 
     def register_output(self, output:Variable, string_name : Union[str, None]=None):
         '''
@@ -970,42 +978,82 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         if isinstance(output, dict):
             if string_name:
                 for key, value in output.items():
-                    name = f'{string_name}_{value.name}'
-                    self.outputs[name] = value
+                    if value.operation:
+                        name = f'{string_name}_{value.operation.name}_{value.name}'
+                        self.outputs[name] = value
+                    else:
+                        name = f'{string_name}_{value.name}'
+                        self.outputs[name] = value
+                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
             else:
                 for key, value in output.items():
-                    name = f'{value.name}'
-                    self.outputs[name] = value
+                    if value.operation:
+                        name = f'{value.operation.name}_{value.name}'
+                        self.outputs[name] = value
+                    else:
+                        name = f'{value.name}'
+                        self.outputs[name] = value
+                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
       
         elif  isinstance(output, list):
             if string_name:
                 for out in output:
-                    name = f'{string_name}_{out.name}'
-                    self.outputs[name] = out
+                    if out.operation:
+                        name = f'{string_name}_{out.operation.name}_{out.name}'
+                        self.outputs[name] = out
+                    else:
+                        name = f'{string_name}_{out.name}'
+                        self.outputs[name] = out
+                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
             else:
                 for out in output:
-                    name = f'{out.name}'
-                    self.outputs[name] = out
-       
+                    if out.operation:
+                        name = f'{out.operation.name}_{out.name}'
+                        self.outputs[name] = out
+                    else:
+                        name = f'{out.name}'
+                        self.outputs[name] = out
+                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
+        
         elif type(output) is Variable:
             if string_name:
-                name = f'{string_name}_{output.name}'
-                self.outputs[name] = output
+                if output.operation:
+                    name = f'{string_name}_{output.operation.name}_{output.name}'
+                else:
+                    name = f'{string_name}_{output.name}'
+                    self.outputs[name] = output
+                    raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
+
             else:
-                name = f'{output.name}'
-                self.outputs[name] = output
+                if output.operation:
+                    name = f'{output.operation.name}_{output.name}'
+                else:
+                    name = f'{output.name}'
+                    self.outputs[name] = output
+                    raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
+                
        
         elif is_dataclass(output):
             # attributes = asdict(output)
             attributes = output.__dict__
             if string_name:
                 for key, value in attributes.items():
-                    name = f'{string_name}_{key}'
-                    self.outputs[name] = value
+                    if value.operation:
+                        name = f'{string_name}_{value.operation.name}_{key}'
+                        self.outputs[name] = value
+                    else:
+                        name = f'{string_name}_{key}'
+                        self.outputs[name] = value
+                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
             else:
                 for key, value in attributes.items():
-                    name = f'{key}'
-                    self.outputs[name] = value
+                    if value.operation:
+                        name = f'{value.operation.name}_{key}'
+                        self.outputs[name] = value
+                    else:
+                        name = f'{key}'
+                        self.outputs[name] = value
+                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
         else:
             print(type(output))
             raise NotImplementedError
@@ -1045,6 +1093,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.constraints.append(m3l_var)
 
     def add_objective(self, m3l_var: Variable, scaler=None):
+        """
+        Method to define an objective
+        """
         m3l_var.scaler = scaler
         self.objective = m3l_var
 
@@ -1104,19 +1155,19 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
             
-            for var in operation.m3l_inputs:
-                var_name = var.name
-                var_val = var.value
-                var_shape = var.shape
-                dv_flag = var.dv_flag
+            # for var in operation.m3l_inputs:
+            #     var_name = var.name
+            #     var_val = var.value
+            #     var_shape = var.shape
+            #     dv_flag = var.dv_flag
 
-                model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
+            #     model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
 
-                if dv_flag:
-                    lower = var.lower
-                    upper = var.upper
-                    scaler = var.scaler
-                    model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+            #     if dv_flag:
+            #         lower = var.lower
+            #         upper = var.upper
+            #         scaler = var.scaler
+            #         model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
 
             # for var in operation.m3l_constraints:
             #     var_name = var.name
@@ -1148,6 +1199,21 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                             model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
                         else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
                             model_csdl.connect(input.name, operation_name+"."+input_name) 
+
+        # Create any user-defined inputs
+        for input in self.user_inputs:
+            var_name = input.name
+            var_val = input.value
+            var_shape = input.shape
+            dv_flag = input.dv_flag
+
+            model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
+
+            if dv_flag:
+                lower = input.lower
+                upper = input.upper
+                scaler = input.scaler
+                model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
 
         
         # Add constraints and objective
