@@ -37,7 +37,7 @@ from m3l.core.csdl_operations import Eig, EigExplicit
 #     arguments : dict
 
 
-class Operation(Module):
+class Operation(OperationBase):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -74,7 +74,7 @@ class ExplicitOperation(Operation):
         Assigns class attributes to make class more like standard python class.
         '''
         self.m3l_inputs = []
-        # self.name = self.parameters['name']
+        self.name = self.parameters['name']
         pass
     
     def compute(self):
@@ -129,18 +129,25 @@ class ExplicitOperation(Operation):
         ----------
         name : str
             Name of the variable.
+        
         val : int, float, or np.ndarray
             Value of the m3l variable.
+        
         shape : tuple, None optional (default: None)
             Shape of the variable specified as a tuple.
+        
         prefix : str, optional
             Optional variable prefix. Recommended to create a unique namespace for variables of the same kind.
+        
         dv_flag : bool, optional, default: False
             Specify whether a certain variable is a design variable for optimization.
+        
         upper : int, float, np.ndarray, or None, optional, default: None
             Set an upper bound on a design variable.
+        
         lower : int, float, np.ndarray, or None, optional, default: None
             Set a lower bound on a design variable.
+        
         scaler : int or float, optional
             Scale design variables.
         
@@ -173,13 +180,21 @@ class ExplicitOperation(Operation):
             name=f"{operation_name}_{name}",
             value=val,
             shape=shape,
-            operation=self,
-            input_flag=True,
+            operation=None,
+            dv_flag=dv_flag,
+            upper=upper, 
+            lower=lower,
+            scaler=scaler,
         )
 
         self.m3l_inputs.append(m3l_var)
 
         return m3l_var
+
+    
+
+
+
 
 class ImplicitOperation(Operation):
     
@@ -268,11 +283,12 @@ class Variable:
     shape : tuple
     operation : Operation = None
     value : np.ndarray = None
-    input_flag : bool = False
     dv_flag : bool = False
     lower : Union[int, float, np.ndarray, None] = None
     upper : Union[int, float, np.ndarray, None] = None
     scaler : Union[int, float, None] = None
+    equals : Union[int, float, np.ndarray, None] = None
+    scaler : Union[int, float, np.ndarray, None] = None
 
     def __add__(self, other):
         import m3l
@@ -932,11 +948,13 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.operations = {}
         self.outputs = {}
         self.parameters = None
+        self.constraints = []
+        self.objective = None
 
     # def add(self, submodel:Model, name:str):
     #     self.models[name] = submodel
 
-    def register_output(self, output:Variable, design_condition=None):
+    def register_output(self, output:Variable, string_name : Union[str, None]=None):
         '''
         Registers a state to the model group so the model group will compute and output this variable.
         If inverse_evaluate is called on a variable that already has a value, the residual is identified
@@ -947,28 +965,47 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         output : Variable
             The variable that the model will output.
         '''
-        if design_condition:
-            prepend = design_condition.parameters['name']
-        else:
-            prepend = ''
+
 
         if isinstance(output, dict):
-            for key, value in output.items():
-                name = f'{prepend}_{value.name}'
-                self.outputs[name] = value
+            if string_name:
+                for key, value in output.items():
+                    name = f'{string_name}_{value.name}'
+                    self.outputs[name] = value
+            else:
+                for key, value in output.items():
+                    name = f'{value.name}'
+                    self.outputs[name] = value
+      
         elif  isinstance(output, list):
-            for out in output:
-                name = f'{prepend}_{out.name}'
-                self.outputs[name] = out
+            if string_name:
+                for out in output:
+                    name = f'{string_name}_{out.name}'
+                    self.outputs[name] = out
+            else:
+                for out in output:
+                    name = f'{out.name}'
+                    self.outputs[name] = out
+       
         elif type(output) is Variable:
-            name = f'{prepend}_{output.name}'
-            self.outputs[name] = output
+            if string_name:
+                name = f'{string_name}_{output.name}'
+                self.outputs[name] = output
+            else:
+                name = f'{output.name}'
+                self.outputs[name] = output
+       
         elif is_dataclass(output):
             # attributes = asdict(output)
             attributes = output.__dict__
-            for key, value in attributes.items():
-                name = f'{prepend}{key}'
-                self.outputs[name] = value
+            if string_name:
+                for key, value in attributes.items():
+                    name = f'{string_name}_{key}'
+                    self.outputs[name] = value
+            else:
+                for key, value in attributes.items():
+                    name = f'{key}'
+                    self.outputs[name] = value
         else:
             print(type(output))
             raise NotImplementedError
@@ -996,25 +1033,34 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         '''
         self.nonlinear_solver_solver = nonlinear_solver
 
+    def add_constraint(self, m3l_var: Variable, lower=None, upper=None, equals=None, scaler=None):
+        """
+        Method to add constraints based on high-level m3l variables
+        """
+        m3l_var.equals = equals
+        m3l_var.lower = lower 
+        m3l_var.upper = upper
+        m3l_var.scaler = scaler
+
+        self.constraints.append(m3l_var)
+
+    def add_objective(self, m3l_var: Variable, scaler=None):
+        m3l_var.scaler = scaler
+        self.objective = m3l_var
 
     def gather_operations(self, variable:Variable):
         if variable:
             if variable.operation is not None:
                 operation = variable.operation
-                # print(operation.arguments.items())
-                
-
                 for input_name, input in operation.arguments.items():
                     if input is not None:
-                        if input.input_flag:
-                            pass
-                        else:
-                            self.gather_operations(input)
+                        self.gather_operations(input)
 
                 if operation.name not in self.operations:
                     self.operations[operation.name] = operation
             else:
-                print(f'Variable {variable.operation} is not part of an operation')
+                pass
+                # print(f'Variable {variable.name} is not part of an operation')
 
 
     # def assemble(self):
@@ -1050,17 +1096,14 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # exit()
         # Assemble output states
         for output_name, output in self.outputs.items():
-            print(f"{output_name}: ", output)
+            # print(f"{output_name}: ", output)
             self.gather_operations(output)
         
         model_csdl = csdl.Model()
 
-        print(self.operations)
-        print(self.operations.items())
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
             
-            print(operation.m3l_inputs)
             for var in operation.m3l_inputs:
                 var_name = var.name
                 var_val = var.value
@@ -1075,7 +1118,18 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     scaler = var.scaler
                     model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
 
+            # for var in operation.m3l_constraints:
+            #     var_name = var.name
+            #     lower = var.c_lower
+            #     upper = var.c_upper
+            #     equals = var.c_equals
+            #     scaler = var.c_scaler
+            #     model_csdl.add_constraint(f"{operation_name}.{var_name}", lower=var.c_lower, upper=upper, equals=equals, scaler=scaler)
 
+            # if operation.objective:
+            #     var_name = operation.objective.name
+            #     scaler = operation.objective.scaler
+            #     model_csdl.add_objective(f"{operation_name}.{var_name}")
 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
@@ -1090,9 +1144,31 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
                 for input_name, input in operation.arguments.items():
                     if input:
-                        if input.operation is not None:
+                        if input.operation is not None: # If the input is associated with an operation
                             model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                        else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
+                            model_csdl.connect(input.name, operation_name+"."+input_name) 
 
+        
+        # Add constraints and objective
+        for var in self.constraints:
+            var_name = var.name
+            lower = var.lower
+            upper = var.upper
+            equals = var.equals
+            scaler = var.scaler
+            operation = var.operation
+            operation_name = operation.name
+
+            model_csdl.add_constraint(name=f"{operation_name}.{var_name}", lower=lower, upper=upper, equals=equals, scaler=scaler)
+
+        if self.objective:
+            var_name = var.name
+            scaler = var.scaler
+            operation = var.operation
+            operation_name = operation.name
+
+            model_csdl.add_objective(name=f"{operation_name}.{var_name}", scaler=scaler)
 
         self.csdl_model = model_csdl
         return self.csdl_model
