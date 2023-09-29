@@ -7,6 +7,7 @@ import array_mapper as am
 import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
 from lsdo_modules.module.module import Module
+from ozone.api import ODEProblem
 
 
 # @dataclass
@@ -532,6 +533,13 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             if operation.name not in self.operations:
                 self.operations[operation.name] = operation
 
+    def gather_operations_implicit(self, variable:Variable):
+        if variable.operation is not None:
+            operation = variable.operation
+            if operation.name not in self.operations:
+                self.operations[operation.name] = operation
+                for input_name, input in operation.arguments.items():
+                    self.gather_operations_implicit(input)
 
     # def assemble(self):
     #     # Assemble output states
@@ -591,4 +599,185 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     def assemble_csdl(self) -> ModuleCSDL:
         self.assemble()
 
+        return self.csdl_model
+
+    # parameters - list[(name, dynamic?, value(s))]
+    def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters=None, integrator='RK4'):
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations_implicit(output)
+        # ODESystemModel = ModuleCSDL()
+        # ODESystemModel.parameters.declare('num_nodes')
+        # n = ODESystemModel.parameters['num_nodes']
+        n = num_times
+        residual_names = []
+        residual_states = []
+        # not collecting parameter names for now, could change this at some point
+
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ImplicitOperation):
+                residual_names.append(operation_name+'.'+operation.residual_name)
+                residual_states.append(operation_name+'.'+operation.residual_state)
+
+        ode_prob = ODEProblem(integrator, 'time-marching', num_times)
+
+        if parameters is not None:
+            for parameter in parameters:
+                if parameter[1]:
+                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=num_times)
+                else:
+                    ode_prob.add_parameter(parameter[0])
+        for i in range(len(residual_states)):
+            ode_prob.add_state(residual_states[i], 
+                                residual_names[i], 
+                                initial_condition_name=residual_states[i]+'_0', 
+                                output=residual_states[i]+'_integrated')
+        ode_prob.add_times(step_vector='h')
+        ode_prob.set_ode_system(AssembledODEModel)
+                
+        RunModel = csdl.Model()
+
+        for ic in initial_conditions:
+            RunModel.create_input(ic[0], ic[1])
+        if parameters is not None:
+            for parameter in parameters:
+                RunModel.create_input(parameter[0], parameter[2])
+        h_vec = np.ones(num_times-1)*h_stepsize
+        RunModel.create_input('h', h_vec)
+        RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+
+        return RunModel
+
+    def assemble_modal(self) -> ModuleCSDL:
+            # Assemble output states'output_jacobian_name'
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations(output)
+        
+        model_csdl = ModuleCSDL()
+        output_jacobian_names = []
+        output_jacobian_vars = []
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute()
+
+                if type(operation_csdl) is csdl.Model:
+                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                jacobian_csdl_model = operation.compute_derivatives()
+                if type(jacobian_csdl_model) is csdl.Model:
+                    model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
+                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                for key, value in operation.residual_partials.items():
+                    model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
+                    
+                    model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
+        self.modal_csdl_model = model_csdl
+        return self.modal_csdl_model
+
+
+class AssembledODEModel(ModuleCSDL):
+    def initialize(self):
+        self.parameters.declare('num_nodes')
+        self.parameters.declare('operations')
+    def define(self):
+        num_nodes = self.parameters['num_nodes']
+        operations = self.parameters['operations']
+
+        for operation_name, operation in operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute(num_nodes=num_nodes)
+
+                if type(operation_csdl) is csdl.Model:
+                    self.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                operation_csdl = operation.compute_residual(num_nodes=num_nodes)
+                if issubclass(type(operation_csdl), csdl.Model):
+                    self.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute_residual() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+
+
+
+# This is a bit of a hack to get a caddee static model to do a modal assemble
+class StructuralModalModel(Model):
+    def assemble(self):
+        # Assemble output states'output_jacobian_name'
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations(output)
+        
+        model_csdl = ModuleCSDL()
+        output_jacobian_names = []
+        output_jacobian_vars = []
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute()
+
+                if type(operation_csdl) is csdl.Model:
+                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                jacobian_csdl_model = operation.compute_derivatives()
+                if type(jacobian_csdl_model) is csdl.Model:
+                    model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
+                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                for key, value in operation.residual_partials.items():
+                    model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
+                    
+                    model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
+        self.csdl_model = model_csdl
         return self.csdl_model
