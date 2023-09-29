@@ -110,107 +110,162 @@ def run_ozone():
 class PredatorCSDL(csdl.Model):
     def initialize(self):
         self.parameters.declare('num_nodes')
+        self.parameters.declare('name')
     def define(self):
+        name = self.parameters['name'] + '_'
         n = self.parameters['num_nodes']
-        y = self.create_input('y', shape=n)
+        y = self.create_input(name+'y', shape=n)
         x = self.create_input('x', shape=n)
 
-        a = self.create_input('a', shape=(n))
-        b = self.create_input('b', shape=(n))
+        a = self.declare_variable(name+'a', shape=(n))
+        b = self.declare_variable(name+'b', shape=(n))
 
         dy_dt = a*y - b*y*x
-        self.register_output('dy_dt', dy_dt)
+        self.register_output(name+'dy_dt', dy_dt)
 
 class PreyCSDL(csdl.Model):
     def initialize(self):
         self.parameters.declare('num_nodes')
+        self.parameters.declare('name')
     def define(self):
+        name = self.parameters['name'] + '_'
         n = self.parameters['num_nodes']
         y = self.create_input('y', shape=n)
-        x = self.create_input('x', shape=n)
+        x = self.create_input(name+'x', shape=n)
 
-        g = self.create_input('g', shape=(n,))
-        d = self.create_input('d')
+        g = self.declare_variable(name+'g', shape=(n,))
+        d = self.declare_variable(name+'d')
 
         dx_dt = g*x*y - csdl.expand(d, n)*x
-        self.register_output('dx_dt', dx_dt)
+        self.register_output(name+'dx_dt', dx_dt)
 
 class Predator(m3l.ImplicitOperation):
     def initialize(self, kwargs):
-        pass
+        self.parameters.declare('name', types=str, default='predator')
     def assign_atributes(self):
-        pass
+        self.name = self.parameters['name']
     def evaluate(self, x:m3l.Variable, y:m3l.Variable):
-        self.name='predator'
+        self.assign_atributes()
+        name = self.name + '_'
+        self.parameters = [name+'a', name+'b']
         self.arguments = {}
         self.inputs = {}
         self.arguments['x'] = x
         self.inputs['x'] = x
-        self.residual_name = 'dy_dt'
-        self.residual_state = 'y'
+        self.residual_name = name+'dy_dt'
+        self.residual_state = name+'y'
         residual = m3l.Variable(name='dy_dt', shape=(1,), operation=self)
         return residual
     def compute_residual(self, num_nodes):
-        csdl_model = PredatorCSDL(num_nodes=num_nodes)
+        csdl_model = PredatorCSDL(num_nodes=num_nodes, name=self.name)
         return csdl_model
 
 class Prey(m3l.ImplicitOperation):
     def initialize(self, kwargs):
-        pass
+        self.parameters.declare('name', types=str, default='prey')
     def assign_atributes(self):
-        pass
+        self.name = self.parameters['name']
     def evaluate(self, x:m3l.Variable, y:m3l.Variable):
-        self.name='prey'
+        self.assign_atributes()
+        name = self.name+'_'
+        self.parameters = [name+'g', name+'d']
         self.arguments = {}
         self.inputs = {}
         self.arguments['y'] = y
         self.inputs['y'] = y
-        self.residual_name = 'dx_dt'
-        self.residual_state = 'x'
+        self.residual_name = name+'dx_dt'
+        self.residual_state = name+'x'
         residual = m3l.Variable(name='dx_dt', shape=(1,), operation=self)
         return residual
     def compute_residual(self, num_nodes):
-        csdl_model = PreyCSDL(num_nodes=num_nodes)
+        csdl_model = PreyCSDL(num_nodes=num_nodes, name=self.name)
         return csdl_model
 
+def run_m3l():
+    m3l_model = m3l.Model()
+
+    predator = Predator()
+    prey = Prey()
+
+    y = m3l.Variable(name='predator_y', shape=(1,), operation=predator)
+    x = m3l.Variable(name='prey_x', shape=(1,), operation=prey)
+
+    predator_residual = predator.evaluate(x, y)
+    prey_residual = prey.evaluate(x,y)
+
+    # idk if I need to do both
+    m3l_model.register_output(output=predator_residual)
+    m3l_model.register_output(output=prey_residual)
+
+    initial_conditions = [('predator_y_0', 2.0),('prey_x_0', 2.0)]
+    num_times = 401
+    h_stepsize = 0.15
+    a = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
+    b = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
+    g = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
+    d = .5  # static parameter
+    for t in range(num_times):
+        a[t] = 1.0 + t/num_times/5.0  # dynamic parameter defined at every timestep
+        b[t] = 0.5 + t/num_times/5.0  # dynamic parameter defined at every timestep
+        g[t] = 2.0 + t/num_times/5.0  # dynamic parameter defined at every timestep
+
+    parameters = [('predator_a', True, a),('predator_b', True, b),('prey_g', True, g), ('prey_d', False, d)]
+
+
+    dynamic_model = m3l_model.assemble_dynamic(initial_conditions=initial_conditions,
+                                            num_times=num_times,
+                                            h_stepsize=h_stepsize,
+                                            parameters=parameters
+                                            )
+    sim = python_csdl_backend.Simulator(dynamic_model, analytics=True)
+    sim.run()
+    # Plot
+    plt.plot(sim['predator_y_integrated'])
+    plt.plot(sim['prey_x_integrated'])
+    plt.show()
+
+def run_m3l_v2():
+    m3l_model = m3l.DynamicModel()
+
+    predator = Predator()
+    prey = Prey()
+
+    y = m3l.Variable(name='predator_y', shape=(1,), operation=predator)
+    x = m3l.Variable(name='prey_x', shape=(1,), operation=prey)
+
+    predator_residual = predator.evaluate(x, y)
+    prey_residual = prey.evaluate(x,y)
+
+    # idk if I need to do both
+    m3l_model.register_output(output=predator_residual)
+    m3l_model.register_output(output=prey_residual)
+
+    initial_conditions = [('predator_y_0', 2.0),('prey_x_0', 2.0)]
+    num_times = 401
+    h_stepsize = 0.15
+    a = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
+    b = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
+    g = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
+    d = .5  # static parameter
+    for t in range(num_times):
+        a[t] = 1.0 + t/num_times/5.0  # dynamic parameter defined at every timestep
+        b[t] = 0.5 + t/num_times/5.0  # dynamic parameter defined at every timestep
+        g[t] = 2.0 + t/num_times/5.0  # dynamic parameter defined at every timestep
+
+    parameters = [('predator_a', True, a),('predator_b', True, b),('prey_g', True, g), ('prey_d', False, d)]
+
+    m3l_model.set_dynamic_options(initial_conditions=initial_conditions,
+                                  num_times=num_times,
+                                  h_stepsize=h_stepsize,
+                                  parameters=parameters)
+    dynamic_model = m3l_model.assemble()
+    sim = python_csdl_backend.Simulator(dynamic_model, analytics=True)
+    sim.run()
+    # Plot
+    plt.plot(sim['predator_y_integrated'])
+    plt.plot(sim['prey_x_integrated'])
+    plt.show()
 
 # run_ozone()
-
-
-m3l_model = m3l.Model()
-
-predator = Predator()
-prey = Prey()
-
-y = m3l.Variable(name='y', shape=(1,), operation=predator)
-x = m3l.Variable(name='x', shape=(1,), operation=prey)
-
-predator_residual = predator.evaluate(x, y)
-prey_residual = prey.evaluate(x,y)
-
-# idk if I need to do both
-m3l_model.register_output(output=predator_residual)
-m3l_model.register_output(output=prey_residual)
-
-initial_conditions = [('predator.y_0', 2.0),('prey.x_0', 2.0)]
-num_times = 401
-h_stepsize = 0.15
-a = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
-b = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
-g = np.zeros((num_times, ))  # dynamic parameter defined at every timestep
-d = 0.5  # static parameter
-for t in range(num_times):
-    a[t] = 1.0 + t/num_times/5.0  # dynamic parameter defined at every timestep
-    b[t] = 0.5 + t/num_times/5.0  # dynamic parameter defined at every timestep
-    g[t] = 2.0 + t/num_times/5.0  # dynamic parameter defined at every timestep
-
-parameters = [('predator.a', True, a),('predator.b', True, b),('prey.g', True, g), ('prey.d', False, d)]
-
-
-dynamic_model = m3l_model.assemble_dynamic(initial_conditions=initial_conditions,
-                                        num_times=num_times,
-                                        h_stepsize=h_stepsize,
-                                        parameters=parameters
-                                        )
-sim = python_csdl_backend.Simulator(dynamic_model, analytics=True)
-sim.run()
+# run_m3l()
+run_m3l_v2()

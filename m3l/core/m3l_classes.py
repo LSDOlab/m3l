@@ -651,7 +651,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         self.function = self.parameters['function']
         self.indexed_mesh = self.parameters['indexed_parametric_coordinates']
     
-    def compute(self):
+    def compute(self, num_nodes:int=1):
         '''
         Creates the CSDL model to compute the function evaluation.
 
@@ -1136,7 +1136,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         return self.csdl_model
 
     # parameters - list[(name, dynamic?, value(s))]
-    def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters=None, integrator='RK4'):
+    def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
         # Assemble output states
         for output_name, output in self.outputs.items():
             self.gather_operations_implicit(output)
@@ -1148,11 +1148,10 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         residual_states = []
         # not collecting parameter names for now, could change this at some point
 
-
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
             if issubclass(type(operation), ImplicitOperation):
-                residual_names.append(operation_name+'.'+operation.residual_name)
-                residual_states.append(operation_name+'.'+operation.residual_state)
+                residual_names.append(operation.residual_name)
+                residual_states.append(operation.residual_state)
 
         ode_prob = ODEProblem(integrator, 'time-marching', num_times)
 
@@ -1228,6 +1227,59 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.modal_csdl_model = model_csdl
         return self.modal_csdl_model
 
+class DynamicModel(Model):
+    def set_dynamic_options(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
+        self.initial_conditions = initial_conditions
+        self.num_times = num_times
+        self.h_stepsize = h_stepsize
+        self.ODE_parameters = parameters
+        self.integrator = integrator
+    def assemble(self):
+        initial_conditions = self.initial_conditions
+        num_times = self.num_times
+        h_stepsize = self.h_stepsize
+        parameters = self.ODE_parameters
+        integrator = self.integrator
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations_implicit(output)
+        residual_names = []
+        residual_states = []
+        # not collecting parameter names for now, could change this at some point
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ImplicitOperation):
+                residual_names.append(operation.residual_name)
+                residual_states.append(operation.residual_state)
+
+        ode_prob = ODEProblem(integrator, 'time-marching', num_times)
+
+        if parameters is not None:
+            for parameter in parameters:
+                if parameter[1]:
+                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=num_times)
+                else:
+                    ode_prob.add_parameter(parameter[0])
+        for i in range(len(residual_states)):
+            ode_prob.add_state(residual_states[i], 
+                                residual_names[i], 
+                                initial_condition_name=residual_states[i]+'_0', 
+                                output=residual_states[i]+'_integrated')
+        ode_prob.add_times(step_vector='h')
+        ode_prob.set_ode_system(AssembledODEModel)
+                
+        RunModel = csdl.Model()
+
+        for ic in initial_conditions:
+            RunModel.create_input(ic[0], ic[1])
+        if parameters is not None:
+            for parameter in parameters:
+                RunModel.create_input(parameter[0], parameter[2])
+        h_vec = np.ones(num_times-1)*h_stepsize
+        RunModel.create_input('h', h_vec)
+        RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+        self.csdl_model=RunModel
+        return RunModel
 
 class AssembledODEModel(ModuleCSDL):
     def initialize(self):
@@ -1255,19 +1307,18 @@ class AssembledODEModel(ModuleCSDL):
             if issubclass(type(operation), ImplicitOperation):
                 # TODO: also take input_jacobian
                 operation_csdl = operation.compute_residual(num_nodes=num_nodes)
+                # promote these for connections in ozone - may need to make residual stuff a list
+                promotions = operation.parameters+[operation.residual_state, operation.residual_name] 
                 if issubclass(type(operation_csdl), csdl.Model):
-                    self.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                    self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
                 elif issubclass(type(operation_csdl), ModuleCSDL):
-                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=promotions)
                 else:
                     raise Exception(f"{operation.name}'s compute_residual() method is returning an invalid model type.")
 
                 for input_name, input in operation.arguments.items():
                     if input.operation is not None and input is not None:
                         self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
-
-
-
 
 # This is a bit of a hack to get a caddee static model to do a modal assemble
 class StructuralModalModel(Model):
