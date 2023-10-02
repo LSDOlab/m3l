@@ -1308,7 +1308,7 @@ class AssembledODEModel(ModuleCSDL):
                 # TODO: also take input_jacobian
                 operation_csdl = operation.compute_residual(num_nodes=num_nodes)
                 # promote these for connections in ozone - may need to make residual stuff a list
-                promotions = operation.parameters+[operation.residual_state, operation.residual_name] 
+                promotions = operation.ode_parameters+[operation.residual_state, operation.residual_name] 
                 if issubclass(type(operation_csdl), csdl.Model):
                     self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
                 elif issubclass(type(operation_csdl), ModuleCSDL):

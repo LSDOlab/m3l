@@ -147,7 +147,7 @@ class Predator(m3l.ImplicitOperation):
     def evaluate(self, x:m3l.Variable, y:m3l.Variable):
         self.assign_atributes()
         name = self.name + '_'
-        self.parameters = [name+'a', name+'b']
+        self.ode_parameters = [name+'a', name+'b']
         self.arguments = {}
         self.inputs = {}
         self.arguments['x'] = x
@@ -168,7 +168,7 @@ class Prey(m3l.ImplicitOperation):
     def evaluate(self, x:m3l.Variable, y:m3l.Variable):
         self.assign_atributes()
         name = self.name+'_'
-        self.parameters = [name+'g', name+'d']
+        self.ode_parameters = [name+'g', name+'d']
         self.arguments = {}
         self.inputs = {}
         self.arguments['y'] = y
