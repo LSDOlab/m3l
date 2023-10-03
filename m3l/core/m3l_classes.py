@@ -1244,27 +1244,27 @@ class DynamicModel(Model):
         for output_name, output in self.outputs.items():
             self.gather_operations_implicit(output)
         residual_names = []
-        residual_states = []
         # not collecting parameter names for now, could change this at some point
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
             if issubclass(type(operation), ImplicitOperation):
-                residual_names.append(operation.residual_name)
-                residual_states.append(operation.residual_state)
+                residual_names += operation.residual_names
 
         ode_prob = ODEProblem(integrator, 'time-marching', num_times)
 
         if parameters is not None:
             for parameter in parameters:
                 if parameter[1]:
-                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=num_times)
+                    print(parameter)
+                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=parameter[2].shape)
                 else:
                     ode_prob.add_parameter(parameter[0])
-        for i in range(len(residual_states)):
-            ode_prob.add_state(residual_states[i], 
-                                residual_names[i], 
-                                initial_condition_name=residual_states[i]+'_0', 
-                                output=residual_states[i]+'_integrated')
+        for i in range(len(residual_names)):
+            ode_prob.add_state(residual_names[i][0], 
+                                residual_names[i][1],
+                                shape = residual_names[i][2],
+                                initial_condition_name=residual_names[i][0]+'_0', 
+                                output=residual_names[i][0]+'_integrated')
         ode_prob.add_times(step_vector='h')
         ode_prob.set_ode_system(AssembledODEModel)
                 
@@ -1308,7 +1308,9 @@ class AssembledODEModel(ModuleCSDL):
                 # TODO: also take input_jacobian
                 operation_csdl = operation.compute_residual(num_nodes=num_nodes)
                 # promote these for connections in ozone - may need to make residual stuff a list
-                promotions = operation.ode_parameters+[operation.residual_state, operation.residual_name] 
+                promotions = operation.ode_parameters
+                for i in range(len(operation.residual_names)):
+                    promotions += [operation.residual_names[i][0], operation.residual_names[i][1]]
                 if issubclass(type(operation_csdl), csdl.Model):
                     self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
                 elif issubclass(type(operation_csdl), ModuleCSDL):

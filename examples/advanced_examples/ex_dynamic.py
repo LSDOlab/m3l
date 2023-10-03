@@ -152,8 +152,7 @@ class Predator(m3l.ImplicitOperation):
         self.inputs = {}
         self.arguments['x'] = x
         self.inputs['x'] = x
-        self.residual_name = name+'dy_dt'
-        self.residual_state = name+'y'
+        self.residual_names = [(name+'y',name+'dy_dt',(1,))]
         residual = m3l.Variable(name='dy_dt', shape=(1,), operation=self)
         return residual
     def compute_residual(self, num_nodes):
@@ -173,8 +172,7 @@ class Prey(m3l.ImplicitOperation):
         self.inputs = {}
         self.arguments['y'] = y
         self.inputs['y'] = y
-        self.residual_name = name+'dx_dt'
-        self.residual_state = name+'x'
+        self.residual_names = [(name+'x',name+'dx_dt',(1,))]
         residual = m3l.Variable(name='dx_dt', shape=(1,), operation=self)
         return residual
     def compute_residual(self, num_nodes):
