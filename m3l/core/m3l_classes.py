@@ -1228,12 +1228,15 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         return self.modal_csdl_model
 
 class DynamicModel(Model):
-    def set_dynamic_options(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
+    def set_dynamic_options(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4', profile_outputs:list=None, profile_system=None, profile_parameters:dict=IndexedFunctionNormalEvaluation):
         self.initial_conditions = initial_conditions
         self.num_times = num_times
         self.h_stepsize = h_stepsize
         self.ODE_parameters = parameters
         self.integrator = integrator
+        self.profile_outputs = profile_outputs
+        self.profile_system = profile_system
+        self.profile_parameters = profile_parameters
     def assemble(self):
         initial_conditions = self.initial_conditions
         num_times = self.num_times
@@ -1250,7 +1253,7 @@ class DynamicModel(Model):
             if issubclass(type(operation), ImplicitOperation):
                 residual_names += operation.residual_names
 
-        ode_prob = ODEProblem(integrator, 'time-marching', num_times)
+        ode_prob = ODEProblem(integrator, 'time-marching checkpointing', num_times)
 
         if parameters is not None:
             for parameter in parameters:
@@ -1267,6 +1270,11 @@ class DynamicModel(Model):
                                 output=residual_names[i][0]+'_integrated')
         ode_prob.add_times(step_vector='h')
         ode_prob.set_ode_system(AssembledODEModel)
+        if self.profile_outputs is not None:
+            for profile_output in self.profile_outputs:
+                ode_prob.add_profile_output(profile_output[0], shape=profile_output[1])
+            ode_prob.set_profile_system(self.profile_system)
+        
                 
         RunModel = csdl.Model()
 
@@ -1277,7 +1285,10 @@ class DynamicModel(Model):
                 RunModel.create_input(parameter[0], parameter[2])
         h_vec = np.ones(num_times-1)*h_stepsize
         RunModel.create_input('h', h_vec)
-        RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+        if self.profile_parameters is not None:
+            RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}, profile_parameters=self.profile_parameters), 'prob')
+        else:
+            RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
         self.csdl_model=RunModel
         return RunModel
 
