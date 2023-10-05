@@ -304,7 +304,7 @@ class Function:
     '''
     name : str
     space : FunctionSpace
-    coefficients : Variable = None
+    coefficients : Variable
 
     def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
@@ -466,19 +466,60 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     A class for storing a group of M3L models. These can be used to establish coupling loops.
     '''
 
-    def __init__(self) -> None:
+    def __init__(self, name:str=None, arguments:dict[str,Variable]=None, outputs:dict[str,Variable]=None,
+                 submodels:dict=None, operations:list[Variable]=None) -> None:
         '''
-        Constructs a model group.
+        Constructs a model.
         '''
-        self.models = {}
-        self.operations = {}
-        self.outputs = {}
-        self.parameters = None
+        self.name = name
+        self.arguments = arguments
+        self.outputs = outputs
+        self.submodels = submodels
+        self.operations = operations
+        
+        if self.arguments is None:
+            self.arguments = {}
+        if self.outputs is None:
+            self.outputs = {}
+        if self.submodels is None:
+            self.submodels = {}
+        if self.operations is None:
+            self.operations = []
+        
+        self.csdl_model = None
 
-    # def add(self, submodel:Model, name:str):
+    # def add(self, submodel, name:str):
     #     self.models[name] = submodel
 
-    def register_output(self, output:Variable):
+    # NOTE: THIS SHOULDN'T BE NEEDED BECAUSE THE GRAPH IS IN THE RUN SCRIPT
+    # def connect(self, connect_from:Variable, connect_to:Variable):
+    #     pass
+
+    def define_submodel(self, name:str, input_variables:list[Variable], output_variables:list[Variable]):
+        '''
+        Defines a submodel to include the operations that compute the output variables from the input variables.
+
+        name : str
+            The name of the submodel
+        input_variables: list[Variable]
+            The input variables to this submodel
+        output_variables: list[Variable]
+            The output variables to this submodel
+        '''
+        arguments = {}
+        for input in input_variables:
+            arguments[input.name] = input
+
+        outputs = {}
+        for output in output_variables:
+            outputs[output.operation.name + '.' + output.name] = output
+
+        submodel = Model(name=name, arguments=arguments, outputs=outputs)
+        self.submodels[name] = submodel
+        # NOTE: There needs to be some sort of .copy() on this returned submodel so the operations don't point to the same place in memory
+        return submodel     # IDEA: The user can use this to define a submodel, then "copy/paste" it to use it multiple times in the run script.
+
+    def register_output(self, output:Variable, name:str=None):
         '''
         Registers a state to the model group so the model group will compute and output this variable.
         If inverse_evaluate is called on a variable that already has a value, the residual is identified
@@ -491,9 +532,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         '''
         if isinstance(output, dict):
             for key, value in output.items():
-                self.outputs[value.name] = value
+                self.outputs[value.operation.name + '.' + value.name] = value
         elif type(output) is Variable:
-            self.outputs[output.name] = output
+            self.outputs[output.operation.name + '.' + output.name] = output
         else:
             print(type(output))
             raise NotImplementedError
@@ -523,66 +564,168 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.nonlinear_solver_solver = nonlinear_solver
 
 
+    def check_if_variable_is_submodel_output(self, variable:Variable):
+        '''
+        Checks if an variable is the output of a stored submodel of this model.
+        '''
+        for submodel_name, submodel in self.submodels.items():
+            for submodel_output_name, submodel_output in submodel.outputs.items():
+                if variable is submodel_output:
+                    return submodel
+        return False
+    
+    def check_if_variable_is_argument(self, variable:Variable):
+        '''
+        Checks if an variable is an argument to this model.
+        '''
+        for argument_name, argument in self.arguments.items():
+            if variable is argument:
+                return True
+        return False
+    
+    def check_if_operation_is_in_model(self, operation:Operation):
+        '''
+        Checks if an explicit operation is within the scope of this model.
+        '''
+        for model_operation in self.operations:
+            if issubclass(type(model_operation), Model):
+                if model_operation.check_if_operation_is_in_model(operation):
+                    return True
+            else:
+                if operation is model_operation:
+                    return True
+                
+    def check_if_operation_has_been_added(self, operation:Operation):
+        '''
+        Checks if this operation has already been added to the model.
+        '''
+        for model_operation in self.operations:
+            if operation is model_operation:
+                return True
+            
+    def get_operation_that_variable_is_input_to(self, variable:Variable):
+        '''
+        Gets the operations that computes a variable
+        '''
+        for operation in self.operations:
+            for argument_name, argument in operation.arguments.items():
+                if variable is argument:
+                    if issubclass(type(operation), Model):
+                        operation.get_operation_that_variable_is_input_to(variable)
+                    else:
+                        return operation, argument_name
+
+
     def gather_operations(self, variable:Variable):
-        if variable.operation is not None:
-            operation = variable.operation
+        is_argument = self.check_if_variable_is_argument(variable)
+        if not is_argument and (variable.operation is not None):
+            submodel = self.check_if_variable_is_submodel_output(variable)
+            if submodel:
+                # for submodel_output_name, submodel_output in submodel.outputs.items():
+                #     submodel.gather_operations(submodel_output)
+                submodel.assemble()
+
+                operation = submodel
+                # self.operations[submodel.name] = submodel
+            else:
+                operation = variable.operation
+            # operation = variable.operation
+
+            # for input_name, input in operation.arguments.items():
             for input_name, input in operation.arguments.items():
                 self.gather_operations(input)
 
-            if operation.name not in self.operations:
-                self.operations[operation.name] = operation
-
-
-    # def assemble(self):
-    #     # Assemble output states
-    #     for output_name, output in self.outputs.items():
-    #         self.gather_operations(output)
-        
-    #     model_csdl = ModuleCSDL()
-
-    #     for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-
-    #         if type(operation.operation_csdl) is csdl.Model:
-    #             model_csdl.add(submodel=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
-    #         else: # type(operation.operation_csdl) is ModuleCSDL:
-    #             model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
-            
-
-    #         for arg_name, arg in operation.arguments.items():
-    #             if arg.operation is not None:
-    #                 model_csdl.connect(arg.operation.name+"."+arg.name, operation_name+"."+arg_name)  # Something like this for no promotions
-    #                 # if arg.name == arg_name:
-    #                 #     continue    # promotion will automatically connect if the names match
-    #                 # else:
-    #                 #     model_csdl.connect(arg.name, arg_name)  # If names don't match, connect manually
-
-    #     self.csdl_model = model_csdl
-    #     return self.csdl_model
+            operation_is_added = self.check_if_operation_has_been_added(operation)
+            # if operation.name not in self.operations:
+            #     self.operations[operation.name] = operation
+            if not operation_is_added:
+                self.operations.append(operation)
     
 
     def assemble(self):
+        if self.csdl_model is not None:
+            return  # Don't waste time reassembling models that are already assembled
+
         # Assemble output states
         for output_name, output in self.outputs.items():
             self.gather_operations(output)
         
         model_csdl = ModuleCSDL()
 
-        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+        for operation in self.operations:   # Already in correct order due to recursion process
 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
 
                 if type(operation_csdl) is csdl.Model:
-                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                    model_csdl.add(submodel=operation_csdl, name=operation.name, promotes=[])
                 elif issubclass(type(operation_csdl), ModuleCSDL):
-                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                    model_csdl.add_module(submodule=operation_csdl, name=operation.name, promotes=[])
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
                 for input_name, input in operation.arguments.items():
-                    if input.operation is not None:
-                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                    operation_is_in_model = self.check_if_operation_is_in_model(input.operation)
+                    if input.operation is not None and operation_is_in_model:
+                        submodel = self.check_if_variable_is_submodel_output(input)
+                        connect_from = input.operation.name+'.'+input.name
+                        connect_to = operation.name+"."+input_name
+                        if submodel:
+                            connect_from = submodel.name+'.'+connect_from   # NOTE: THIS ONLY WORKS FOR ONE LEVEL OF SUBMODELS
+                        # NOTE: ALSO, IF WE HAVE MULTIPLE LEVELS ON THE MODEL NESTING, WE ONLY WANT ONE CONNECTION, NOT ONE PER LEVEL
+                        #   One idea is to only do the inner-model connections here (operation -> operation) and do all of the model connections
+                        #       from the top level. Follow-up: I am kind of doing this, but the naming still only works one level.
+                        model_csdl.connect(connect_from, connect_to)
+            elif issubclass(type(operation), ImplicitOperation):
+                # TODO
+                pass
 
+            # General strategy:
+            #   Create a submodel heirarchy according to user definitions of inputs/outputs. The boundaries of these submodels cannot overlap.
+            #   When creating the m3l model's csdl model, nest the appropriate operations in csdl model's to match the heirarchy. This will
+            #   make sure the namespace is unique (both csdl and m3l). On m3l side, need to append to dictionary name.
+            #   IDEA: When assembling at the model level, check if the string has a . in it to see if it's in a model. In gathering time,
+            #       I need to append that to the dictionary name.
+
+            # NOTE: I don't think the models should show up here as operations. ACTUALLY, NOW I THINK THEY SHOULD?
+            elif issubclass(type(operation), Model):
+                # First establish explicit model heirarchy, then figure out implicit model heirarchy.
+                # Do we want recursion into the model heirarchy?
+                # Objects should not store their parents. Only parents storing children (this makes more sense from an object definition
+                # and object orientated programming philosophy). In MappedArrays, subsequent arrays have nothing to do with the definition of
+                # an array in question (which would be the parent to subsequent arrays), while a Model is definitely defined by its children.
+
+                # COMPLETE 180!! The thing with M3L is that we are taking a variable-centric approach, which is the opposite from CSDL which 
+                # is a model-centric approach.
+                operation_csdl = operation.csdl_model
+                model_csdl.add_module(submodule=operation_csdl, name=operation.name, promotes=[])
+
+                for _, input in operation.arguments.items():
+                    # continue
+                    operation_is_in_model = self.check_if_operation_is_in_model(input.operation)
+                    if input.operation is not None and operation_is_in_model:
+                        connect_from = input.operation.name+"."+input.name
+                        operation_that_this_variable_feeds_to_and_name = operation.get_operation_that_variable_is_input_to(input)
+                        if operation_that_this_variable_feeds_to_and_name is not None:
+                            operation_that_this_variable_feeds_to = operation_that_this_variable_feeds_to_and_name[0]
+                            input_name = operation_that_this_variable_feeds_to_and_name[1]
+                        else:
+                            continue    # Not sure if this is correct, but currently ignoring arguments that aren't used.
+                        model_name = operation.name
+                        operation_name = operation_that_this_variable_feeds_to.name
+                        connect_to = model_name+'.'+operation_name+'.'+ input_name
+
+                        submodel = self.check_if_variable_is_submodel_output(input)
+                        if submodel:
+                            connect_from = submodel.name+'.'+connect_from   # NOTE: THIS ONLY WORKS FOR ONE LEVEL OF SUBMODELS
+                        # NOTE: ALSO, IF WE HAVE MULTIPLE LEVELS ON THE MODEL NESTING, WE ONLY WANT ONE CONNECTION, NOT ONE PER LEVEL
+                        model_csdl.connect(connect_from, connect_to)
+
+            # elif issubclass(type(operation), ImplicitModel):
+            #     # Want this to add this csdl model, resolve coupling, and make connections.
+            #     # I think the gather_operations needs to also store the heirarchy so we know how to make connections.
+            #     operation_csdl = operation.assemble_csdl()
+            #     model_csdl.add(submodel=operation_csdl, name=operation.name, promotes=[])
 
         self.csdl_model = model_csdl
         return self.csdl_model
@@ -592,3 +735,52 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.assemble()
 
         return self.csdl_model
+    
+    def evaluate(self, inputs:list[Variable]):
+        '''
+        This is meant for submodels. This takes in the list of arguments and outputs the outputs.
+
+        TODO: The outputs need to be copied/remade to have this model as the operation that computes it.
+        '''
+        return self.outputs
+    
+
+@dataclass
+class Submodel:
+    name : str
+    model : Model
+    inputs : list[Variable]
+    outputs : list[Variable]
+    operations : list[Operation] = None
+    submodels : list = None # list of submodels # NOTE: Start with no nesting of submodels.
+
+    def gather_my_operations(self):
+        for output_name, output in self.outputs.items():
+            self.gather_operations(output)
+
+    def gather_operations(self, variable:Variable):
+        if variable.operation is not None:
+            operation = variable.operation
+            for input_name, input in operation.arguments.items():
+                self.gather_operations(input)
+
+            if operation not in self.operations:    # need to properly check
+                self.operations[operation.name] = operation
+
+        # for operation_input_name, operation_input in variable.arguments.items():
+        #     self.operations[operation_input_name] = operation_input
+        #     # use recursion
+        
+        #     if operation_input is submodel_input:
+        #         continue (exit branch of computational tree)
+
+
+class ImplicitModel:
+    
+    def __init__(self) -> None:
+        pass
+
+
+    def assemble_csdl(self):
+        pass
+
