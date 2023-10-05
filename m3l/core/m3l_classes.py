@@ -67,6 +67,7 @@ class CSDLOperation(Operation):
 class ExplicitOperation(Operation):
     def initialize(self, kwargs):
         self.parameters.declare('name', types=str)
+        self.parameters.declare('nested_connection_name', types=bool, default=False)
 
 
     def assign_attributes(self):
@@ -75,6 +76,7 @@ class ExplicitOperation(Operation):
         '''
         self.m3l_inputs = []
         self.name = self.parameters['name']
+        # self.nested_connection_name = self.parameters['nested_connection_name']
         pass
     
     def compute(self):
@@ -217,6 +219,20 @@ class Variable:
     def __add__(self, other):
         import m3l
         return m3l.add(self, other)
+    
+    def __sub__(self, other):
+        import m3l
+        return m3l.subtract(self, other)
+    
+    def __mul__(self, other):
+        import m3l
+        return m3l.multiply(self, other)
+    
+    def __truediv__(self, other):
+        import m3l
+        return m3l.divide(self, other)
+    
+    
 
 
 # @dataclass
@@ -234,138 +250,6 @@ class Variable:
 #     operation : Operation = None
 #     value : np.ndarray = None
 
-class VStack(ExplicitOperation):
-    def initialize(self, kwargs):
-        pass
-
-    def compute(self):
-        '''
-        Creates the CSDL model to compute the function evaluation.
-
-        Returns
-        -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
-        '''
-        x1 = self.arguments['x1']
-        x2 = self.arguments['x2']
-        # shape = x1.shape
-        # shape[0] = x2.shape[0]
-        shape = self.shape
-        output_name = f'{x1.name}_stack_{x2.name}'
-        operation_csdl = csdl.Model()
-        x1_csdl = operation_csdl.declare_variable(name='x1', shape=x1.shape)
-        x2_csdl = operation_csdl.declare_variable(name='x2', shape=x2.shape)
-        y = operation_csdl.create_output(name=output_name, shape=shape)
-        y[0:x1.shape[0],:] = x1_csdl
-        y[x1.shape[0]:,:] = x2_csdl
-        # operation_csdl.register_output(name=output_name, var=y)
-        return operation_csdl
-
-    def compute_derivates(self):
-        '''
-        -- optional --
-        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
-        For now, I would recommend coming back to this.
-
-        Returns
-        -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
-        '''
-        pass
-
-    def evaluate(self, x1:Variable, x2:Variable, design_condition=None) -> Variable:
-        '''
-        User-facing method that the user will call to define a model evaluation.
-
-        Parameters
-        ----------
-        mesh : Variable
-            The mesh over which the function will be evaluated.
-
-        Returns
-        -------
-        function_values : Variable
-            The values of the function at the mesh locations.
-        '''
-        if design_condition:
-            dc_name = design_condition.parameters['name']
-            self.name = f'{dc_name}_{x1.name}_stack_{x2.name}_operation'
-        else:
-            self.name = f'{x1.name}_stack_{x2.name}_operation'
-
-        # Define operation arguments
-        self.arguments = {'x1' : x1, 'x2' : x2}
-        # shape = x1.shape
-        # shape[0] = x2.shape[0]
-
-        self.shape = (x1.shape[0] + x2.shape[0], ) + x1.shape[1:]
-        # exit(shape)
-        # Create the M3L variables that are being output
-        function_values = Variable(name=f'{x1.name}_stack_{x2.name}', shape=self.shape, operation=self)
-        return function_values
-
-class Add(ExplicitOperation):
-
-    def initialize(self, kwargs):
-        pass
-    
-    def compute(self):
-        '''
-        Creates the CSDL model to compute the function evaluation.
-
-        Returns
-        -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
-        '''
-        x1 = self.arguments['x1']
-        x2 = self.arguments['x2']
-
-        operation_csdl = csdl.Model()
-        x1_csdl = operation_csdl.declare_variable(name='x1', shape=x1.shape)
-        x2_csdl = operation_csdl.declare_variable(name='x2', shape=x2.shape)
-        y = x1_csdl + x2_csdl
-        output_name = f'{x1.name}_plus_{x2.name}'
-        operation_csdl.register_output(name=output_name, var=y)
-        return operation_csdl
-
-    def compute_derivates(self):
-        '''
-        -- optional --
-        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
-        For now, I would recommend coming back to this.
-
-        Returns
-        -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
-        '''
-        pass
-
-    def evaluate(self, x1:Variable, x2:Variable) -> Variable:
-        '''
-        User-facing method that the user will call to define a model evaluation.
-
-        Parameters
-        ----------
-        mesh : Variable
-            The mesh over which the function will be evaluated.
-
-        Returns
-        -------
-        function_values : Variable
-            The values of the function at the mesh locations.
-        '''
-        self.name = f'{x1.name}_plus_{x2.name}_operation'
-
-        # Define operation arguments
-        self.arguments = {'x1' : x1, 'x2' : x2}
-
-        # Create the M3L variables that are being output
-        function_values = Variable(name=f'{x1.name}_plus_{x2.name}', shape=x1.shape, operation=self)
-        return function_values
 
 
 
@@ -936,6 +820,18 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         if shape:
             var_shape = shape
+            if isinstance(val, np.ndarray):
+                if var_shape != val.shape:
+                    error_message = f"Shape mismatch: variable '{name}' has shape {val.shape} but the specified shape is {var_shape}. If you would like to expand the array, consider using 'np.newaxis' in combination with 'np.repeat'. See the example below \n\n"
+                    
+                    error_message += '''\
+                        a = np.array([1, 2, 3])
+                        a_exp = a[np.newaxis, :].repeat(n, axis=0)
+
+                        Here, a_exp will have dimensions (n, 3).
+                    '''
+                    raise ValueError(error_message)
+
         else:
             if isinstance(val, (int, float)):
                 var_shape = (1, )
@@ -1019,6 +915,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             if string_name:
                 if output.operation:
                     name = f'{string_name}_{output.operation.name}_{output.name}'
+                    self.outputs[name] = output
                 else:
                     name = f'{string_name}_{output.name}'
                     self.outputs[name] = output
@@ -1027,6 +924,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             else:
                 if output.operation:
                     name = f'{output.operation.name}_{output.name}'
+                    self.outputs[name] = output
                 else:
                     name = f'{output.name}'
                     self.outputs[name] = output
@@ -1038,22 +936,34 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             attributes = output.__dict__
             if string_name:
                 for key, value in attributes.items():
-                    if value.operation:
-                        name = f'{string_name}_{value.operation.name}_{key}'
-                        self.outputs[name] = value
+                    if is_dataclass(value):
+                        self.register_output(value, string_name=string_name)
+                    
+                    elif not isinstance(value, Variable):
+                        pass
                     else:
-                        name = f'{string_name}_{key}'
-                        self.outputs[name] = value
-                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
+                        if value.operation:
+                            name = f'{string_name}_{value.operation.name}_{key}'
+                            self.outputs[name] = value
+                        else:
+                            name = f'{string_name}_{key}'
+                            self.outputs[name] = value
+                            raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
             else:
                 for key, value in attributes.items():
-                    if value.operation:
-                        name = f'{value.operation.name}_{key}'
-                        self.outputs[name] = value
+                    if is_dataclass(value):
+                        self.register_output(value)
+
+                    elif not isinstance(value, Variable):
+                        pass
                     else:
-                        name = f'{key}'
-                        self.outputs[name] = value
-                        raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
+                        if value.operation:
+                            name = f'{value.operation.name}_{key}'
+                            self.outputs[name] = value
+                        else:
+                            name = f'{key}'
+                            self.outputs[name] = value
+                            raise Warning(f"Variable {value.name} is not computed from any upstream operation. Registering this as an output doesn't accomplish anything.")
         else:
             print(type(output))
             raise NotImplementedError
@@ -1101,6 +1011,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
     def gather_operations(self, variable:Variable):
         if variable:
+            # print(variable)
             if variable.operation is not None:
                 operation = variable.operation
                 for input_name, input in operation.arguments.items():
@@ -1147,45 +1058,14 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # exit()
         # Assemble output states
         for output_name, output in self.outputs.items():
-            # print(f"{output_name}: ", output)
             self.gather_operations(output)
         
         model_csdl = csdl.Model()
 
-
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-            
-            # for var in operation.m3l_inputs:
-            #     var_name = var.name
-            #     var_val = var.value
-            #     var_shape = var.shape
-            #     dv_flag = var.dv_flag
-
-            #     model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
-
-            #     if dv_flag:
-            #         lower = var.lower
-            #         upper = var.upper
-            #         scaler = var.scaler
-            #         model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
-
-            # for var in operation.m3l_constraints:
-            #     var_name = var.name
-            #     lower = var.c_lower
-            #     upper = var.c_upper
-            #     equals = var.c_equals
-            #     scaler = var.c_scaler
-            #     model_csdl.add_constraint(f"{operation_name}.{var_name}", lower=var.c_lower, upper=upper, equals=equals, scaler=scaler)
-
-            # if operation.objective:
-            #     var_name = operation.objective.name
-            #     scaler = operation.objective.scaler
-            #     model_csdl.add_objective(f"{operation_name}.{var_name}")
 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
-                print('\n')
-                print(operation_name)
                 if issubclass(type(operation_csdl), csdl.Model):
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 elif issubclass(type(operation_csdl), ModuleCSDL):
@@ -1193,13 +1073,40 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
 
-                for input_name, input in operation.arguments.items():
-                    if input:
-                        if input.operation is not None: # If the input is associated with an operation
-                            model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
-                        else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
-                            model_csdl.connect(input.name, operation_name+"."+input_name) 
 
+                if not operation.arguments and 'connect_from' in operation.parameters:
+                    for i in range(len(operation.parameters['connect_from'])):
+                        connect_from = operation.parameters['connect_from'][i]
+                        connect_to = operation.parameters['connect_to'][i]
+                        model_csdl.connect(connect_from, connect_to) 
+
+                else:
+                    for input_name, input in operation.arguments.items():
+                        if input:
+                            if input.operation is not None: # If the input is associated with an operation
+                                    model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
+                            else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
+                                model_csdl.connect(input.name, operation_name+"."+input_name) 
+                    
+                                       
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                jacobian_csdl_model = operation.compute_derivatives()
+                if issubclass(type(jacobian_csdl_model), csdl.Model):
+                # if type(jacobian_csdl_model) is csdl.Model:
+                    model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
+                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                for key, value in operation.residual_partials.items():
+                    model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
+                    
+                    model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
         # Create any user-defined inputs
         for input in self.user_inputs:
             var_name = input.name
@@ -1229,11 +1136,10 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             model_csdl.add_constraint(name=f"{operation_name}.{var_name}", lower=lower, upper=upper, equals=equals, scaler=scaler)
 
         if self.objective:
-            var_name = var.name
-            scaler = var.scaler
-            operation = var.operation
-            operation_name = operation.name
-
+            var_name = self.objective.name
+            scaler = self.objective.scaler
+            operation = self.objective.operation
+            operation_name = self.objective.operation.name
             model_csdl.add_objective(name=f"{operation_name}.{var_name}", scaler=scaler)
 
         self.csdl_model = model_csdl
@@ -1270,6 +1176,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 for input_name, input in operation.arguments.items():
                     if input.operation is not None:
                         model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                    else:
+                        model_csdl.connect(input.name, operation_name+"."+input_name)
 
             if issubclass(type(operation), ImplicitOperation):
                 # TODO: also take input_jacobian

@@ -1,5 +1,5 @@
 import csdl
-import csdl_om
+# import csdl_om
 import numpy as np
 
 class Eig(csdl.Model):
