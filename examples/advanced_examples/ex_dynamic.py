@@ -153,7 +153,7 @@ class Predator(m3l.ImplicitOperation):
         self.arguments['x'] = x
         self.inputs['x'] = x
         self.residual_names = [(name+'y',name+'dy_dt',(1,))]
-        residual = m3l.Variable(name='dy_dt', shape=(1,), operation=self)
+        residual = m3l.Variable(name='dy_dt', shape=(1,), operation=self) # think about not asking for duplicate info (residual names)
         return residual
     def compute_residual(self, num_nodes):
         csdl_model = PredatorCSDL(num_nodes=num_nodes, name=self.name)

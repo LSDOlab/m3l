@@ -1228,7 +1228,16 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         return self.modal_csdl_model
 
 class DynamicModel(Model):
-    def set_dynamic_options(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4', profile_outputs:list=None, profile_system=None, profile_parameters:dict=IndexedFunctionNormalEvaluation):
+    def set_dynamic_options(self, 
+                            initial_conditions:list, 
+                            num_times:int, 
+                            h_stepsize:float, 
+                            parameters:list=None, 
+                            integrator:str='RK4',
+                            approach:str='time-marching checkpointing',
+                            profile_outputs:list=None, 
+                            profile_system=None, 
+                            profile_parameters:dict=IndexedFunctionNormalEvaluation):
         self.initial_conditions = initial_conditions
         self.num_times = num_times
         self.h_stepsize = h_stepsize
@@ -1237,6 +1246,7 @@ class DynamicModel(Model):
         self.profile_outputs = profile_outputs
         self.profile_system = profile_system
         self.profile_parameters = profile_parameters
+        self.approach = approach
     def assemble(self):
         initial_conditions = self.initial_conditions
         num_times = self.num_times
@@ -1253,7 +1263,7 @@ class DynamicModel(Model):
             if issubclass(type(operation), ImplicitOperation):
                 residual_names += operation.residual_names
 
-        ode_prob = ODEProblem(integrator, 'time-marching checkpointing', num_times)
+        ode_prob = ODEProblem(integrator, self.approach, num_times)
 
         if parameters is not None:
             for parameter in parameters:
