@@ -1237,7 +1237,9 @@ class DynamicModel(Model):
                             approach:str='time-marching checkpointing',
                             profile_outputs:list=None, 
                             profile_system=None, 
-                            profile_parameters:dict=IndexedFunctionNormalEvaluation):
+                            profile_parameters:dict=None,
+                            post_processor=None,
+                            pp_vars:list=None):
         self.initial_conditions = initial_conditions
         self.num_times = num_times
         self.h_stepsize = h_stepsize
@@ -1247,7 +1249,9 @@ class DynamicModel(Model):
         self.profile_system = profile_system
         self.profile_parameters = profile_parameters
         self.approach = approach
-    def assemble(self):
+        self.post_processor = post_processor
+        self.pp_vars = pp_vars
+    def assemble(self, return_operation:bool=False):
         initial_conditions = self.initial_conditions
         num_times = self.num_times
         h_stepsize = self.h_stepsize
@@ -1265,10 +1269,9 @@ class DynamicModel(Model):
 
         ode_prob = ODEProblem(integrator, self.approach, num_times)
 
-        if parameters is not None:
+        if parameters is not None:  # do a register output and addemble model for each parameter that's a m3l var
             for parameter in parameters:
                 if parameter[1]:
-                    print(parameter)
                     ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=parameter[2].shape)
                 else:
                     ode_prob.add_parameter(parameter[0])
@@ -1291,16 +1294,60 @@ class DynamicModel(Model):
         for ic in initial_conditions:
             RunModel.create_input(ic[0], ic[1])
         if parameters is not None:
+            parameter_model = Model()
+            add_flag = False
             for parameter in parameters:
-                RunModel.create_input(parameter[0], parameter[2])
+                if type(parameter[2]) is Variable:
+                    add_flag = True
+                    parameter_model.register_output(parameter[2])
+            parameter_model_csdl = parameter_model.assemble()
+            if add_flag:
+                RunModel.add(parameter_model)
+            for parameter in parameters:
+                if not type(parameter[2]) is Variable:
+                    RunModel.create_input(parameter[0], parameter[2])
         h_vec = np.ones(num_times-1)*h_stepsize
         RunModel.create_input('h', h_vec)
         if self.profile_parameters is not None:
             RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}, profile_parameters=self.profile_parameters), 'prob')
         else:
             RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+
+        if self.post_processor is not None:
+            RunModel.add(self.post_processor, name='post_processor')
+
         self.csdl_model=RunModel
-        return RunModel
+        if return_operation:
+            operation = DynamicOperation()
+            operation.set_model(RunModel)
+            outputs = []
+            if self.pp_vars is not None:
+                for val in self.pp_vars:
+                    outputs.append(Variable(val[0], val[1], operation=operation))
+            if self.profile_outputs is not None:
+                for val in self.profile_outputs:
+                    outputs.append(Variable(val[0], val[1], operation=operation))
+            for val in residual_names:
+                outputs.append(Variable(val[0] + '_integrated', val[2], operation=operation))
+            operation.set_outputs(outputs)
+            return operation
+        else:
+            return RunModel
+
+class DynamicOperation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('name', default='operation')
+        self.name = self.parameters['name']
+    def set_model(self, model):
+        self.csdl_model = model
+    def set_outputs(self, outputs):
+        self.outputs = outputs
+    def evaluate(self):
+        self.arguments = {}
+        return tuple(self.outputs)
+    def compute(self):
+        return self.csdl_model
+
 
 class AssembledODEModel(ModuleCSDL):
     def initialize(self):
