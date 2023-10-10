@@ -403,7 +403,7 @@ class Function:
     '''
     name : str
     space : FunctionSpace
-    coefficients : Variable = None
+    coefficients : Variable
 
     def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
@@ -1302,10 +1302,14 @@ class DynamicModel(Model):
                     parameter_model.register_output(parameter[2])
             parameter_model_csdl = parameter_model.assemble()
             if add_flag:
-                RunModel.add(parameter_model)
+                RunModel.add(parameter_model_csdl, name='input_model')
             for parameter in parameters:
                 if not type(parameter[2]) is Variable:
                     RunModel.create_input(parameter[0], parameter[2])
+                else:
+                    RunModel.create_input(parameter[0], shape=parameter[2].shape)
+                    in_name = 'input_model.' + parameter[2].operation.name + '.' + parameter[2].name
+                    RunModel.connect(in_name, parameter[0])
         h_vec = np.ones(num_times-1)*h_stepsize
         RunModel.create_input('h', h_vec)
         if self.profile_parameters is not None:
