@@ -1231,7 +1231,8 @@ class DynamicModel(Model):
     def set_dynamic_options(self, 
                             initial_conditions:list, 
                             num_times:int, 
-                            h_stepsize:float, 
+                            h_stepsize:float,
+                            int_naming:tuple = ('','_integrated'),
                             parameters:list=None, 
                             integrator:str='RK4',
                             approach:str='time-marching checkpointing',
@@ -1251,12 +1252,14 @@ class DynamicModel(Model):
         self.approach = approach
         self.post_processor = post_processor
         self.pp_vars = pp_vars
+        self.int_naming = int_naming
     def assemble(self, return_operation:bool=False):
         initial_conditions = self.initial_conditions
         num_times = self.num_times
         h_stepsize = self.h_stepsize
         parameters = self.ODE_parameters
         integrator = self.integrator
+        int_naming = self.int_naming
         # Assemble output states
         for output_name, output in self.outputs.items():
             self.gather_operations_implicit(output)
@@ -1280,7 +1283,8 @@ class DynamicModel(Model):
                                 residual_names[i][1],
                                 shape = residual_names[i][2],
                                 initial_condition_name=residual_names[i][0]+'_0', 
-                                output=residual_names[i][0]+'_integrated')
+                                output=int_naming[0] + residual_names[i][0] + int_naming[1])
+                                # output=residual_names[i][0]+'_integrated')
         ode_prob.add_times(step_vector='h')
         ode_prob.set_ode_system(AssembledODEModel)
         if self.profile_outputs is not None:
@@ -1332,7 +1336,9 @@ class DynamicModel(Model):
                 for val in self.profile_outputs:
                     outputs.append(Variable(val[0], val[1], operation=operation))
             for val in residual_names:
-                outputs.append(Variable(val[0] + '_integrated', val[2], operation=operation))
+                # outputs.append(Variable(val[0] + '_integrated', val[2], operation=operation))
+                outputs.append(Variable('op_' + val[0], val[2], operation=operation))
+
             operation.set_outputs(outputs)
             return operation
         else:
