@@ -1,6 +1,7 @@
 import csdl
 from m3l.core.m3l_classes import ExplicitOperation, Variable
 import numpy as np
+import scipy.sparse as sps
 from m3l.utils.utility_functions import replace_periods_with_underscores
 from python_csdl_backend import Simulator
 
@@ -276,6 +277,83 @@ class Division(ExplicitOperation):
         sim.run()
         function_values.value = sim[output_name]
         return function_values
+    
+
+class Reshape(ExplicitOperation):
+    '''
+    Reshapes the variable to a new shape.
+    '''
+    def initialize(self, kwargs):
+        self.parameters.declare('shape', types=tuple)
+        self.parameters.declare('name', types=str, default='reshape_operation')
+
+    def assign_attributes(self):
+        self.shape = self.parameters['shape']
+
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        x = self.arguments['x']
+        shape = self.shape
+
+        operation_csdl = csdl.Model()
+        x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape)
+        
+        size = np.prod(x.value.shape)
+        new_shape = list(shape)
+        for i in range(len(shape)):
+            if shape[i] == -1:
+                size_others = np.prod(shape)/(-1)
+                new_shape[i] = int(size/size_others)
+                break
+        shape = tuple(new_shape)
+        self.shape = shape
+        x_reshaped = csdl.reshape(x_csdl, shape)
+
+        output_name = replace_periods_with_underscores( f'{x.name}_reshaped')
+        operation_csdl.register_output(name=output_name, var=x_reshaped)
+        return operation_csdl
+
+    def evaluate(self, x : Variable) -> Variable:
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        output : Variable
+            The reshaped variable.
+        '''
+        self.name = f'{x.name}_reshaped_operation_to_{self.shape}'
+        self.parameters['name'] = self.name
+
+        # Define operation arguments
+        self.arguments = {'x' : x}
+
+        operation_csdl = self.compute()
+
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(f'{x.name}_reshaped')
+        output = Variable(name=output_name, shape=self.shape, operation=self)
+        
+        # create csdl model for in-line evaluations
+        sim = Simulator(operation_csdl)
+        sim['x'] = x.value
+        sim.run()
+        output.value = sim[output_name]
+
+        return output
+
 
 class CrossProduct(ExplicitOperation):
     """
@@ -306,7 +384,7 @@ class CrossProduct(ExplicitOperation):
         self.arguments = {'x1': x1, 'x2' : x2}
 
         output_name = replace_periods_with_underscores(f'{x1.name}_cross_{x2.name}')
-        function_values = Variable(name=output_name, shape=x1.shape, operation=self)
+        output = Variable(name=output_name, shape=x1.shape, operation=self)
 
         # create csdl model for in-line evaluations
         operation_csdl = self.compute()
@@ -314,11 +392,9 @@ class CrossProduct(ExplicitOperation):
         sim['x1'] = x1.value
         sim['x2'] = x2.value
         sim.run()
-        function_values.value = sim[output_name]
-
+        output.value = sim[output_name]
         
-        return function_values
-
+        return output
 
 
 class VStack(ExplicitOperation):
@@ -403,3 +479,88 @@ class VStack(ExplicitOperation):
         
         return function_values
 
+
+
+class MatVec(ExplicitOperation):
+    '''
+    Class for the matvec product operation.
+    '''
+    def initialize(self, kwargs):
+        self.parameters.declare('name', types=str, default='dot_operation')
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        map = self.arguments['map']
+        x = self.arguments['x']
+
+        operation_csdl = csdl.Model()
+        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape)
+        x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape)
+
+        b = csdl.matvec(map_csdl, x_csdl)
+
+        output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
+        operation_csdl.register_output(name=output_name, var=b)
+
+        return operation_csdl
+
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self, map:Variable, x:Variable) -> Variable:
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        import m3l
+        if type(map) is np.ndarray or sps.isspmatrix(map):
+            map_name = 'constant_map'
+            map = m3l.Variable(name=map_name, shape=map.shape, operation=None, value=map)
+
+        self.name = f'{map.name}_multiplied_with_{x.name}_operation'
+
+        
+
+        # Define operation arguments
+        self.arguments = {'map' : map, 'x' : x}
+
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
+        output_shape = (map.shape[0],)
+        output = Variable(name=output_name, shape=output_shape, operation=self)
+        
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
+        sim['map'] = map.value
+        sim['x'] = x.value
+        sim.run()
+        output.value = sim[output_name]
+        
+        return output

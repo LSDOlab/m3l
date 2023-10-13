@@ -121,8 +121,6 @@ class ExplicitOperation(Operation):
 
 
 
-
-
 class ImplicitOperation(Operation):
     
     def assign_attributes(self):
@@ -232,25 +230,20 @@ class Variable:
         import m3l
         return m3l.divide(self, other)
     
+    def __str__(self):
+        return str(self.value)
     
+    def reshape(self, shape:tuple):
+        '''
+        Reshapes the variable.
 
-
-# @dataclass
-# class NDArray:
-#     '''
-#     An n-dimensional array.
-
-#     name : str
-#         The name of the array.
-#     shape : tuple
-#         The shape of the array.
-#     '''
-#     name : str
-#     shape : np.ndarray
-#     operation : Operation = None
-#     value : np.ndarray = None
-
-
+        Parameters
+        ----------
+        shape : tuple
+            The new shape of the variable.
+        '''
+        import m3l
+        return m3l.reshape(self, shape)
 
 
 @dataclass
@@ -292,7 +285,7 @@ class Function:
     '''
     name : str
     space : FunctionSpace
-    coefficients : Variable = None
+    coefficients : Variable
 
     def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
