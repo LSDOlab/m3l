@@ -1079,7 +1079,10 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                             if input.operation is not None: # If the input is associated with an operation
                                     model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
                             else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
-                                model_csdl.connect(input.name, operation_name+"."+input_name) 
+                                if input in self.user_inputs:
+                                    model_csdl.connect(input.name, operation_name+"."+input_name) 
+                                else:
+                                    pass
                     
                                        
             if issubclass(type(operation), ImplicitOperation):
