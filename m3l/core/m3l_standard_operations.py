@@ -501,7 +501,7 @@ class MatVec(ExplicitOperation):
         x = self.arguments['x']
 
         operation_csdl = csdl.Model()
-        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value)
+        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value.toarray())
         x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape, val=x.value)
 
         b = csdl.matvec(map_csdl, x_csdl)
@@ -752,6 +752,10 @@ class Rotate(ExplicitOperation):
             The values of the function at the mesh locations.
         '''
         import m3l
+
+        if len(points.shape) == 1:
+            print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
+            points = points.reshape((-1,3))
 
         if type(points) is np.ndarray:
             points_name = 'constant_points'

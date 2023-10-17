@@ -2,6 +2,14 @@ import csdl
 from m3l.core.m3l_classes import Variable
 from m3l.core.m3l_standard_operations import *
 
+def copy(x : Variable):
+    """
+    Performs a deep copy of an m3l variable
+    """
+    copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
+                        dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
+                        equals=x.equals)
+    return copy_var
 
 def add(x1, x2):
     '''
@@ -169,3 +177,89 @@ def matvec(map : Variable, x : Variable):
     matvec_operation = MatVec()
 
     return matvec_operation.evaluate(map=map, x=x)
+
+def matmat(map : Variable, x : Variable):
+    """
+    Performs matrix-vector multiplication of two m3l variables
+    """
+    matmat_operation = MatMat()
+
+    return matmat_operation.evaluate(map=map, x=x)
+
+
+def rotate(points:Variable, axis_origin:Variable, axis_vector:Variable, angles:Variable, units:str='degrees'):
+    """
+    Performs rotation of an m3l variable about an axis by an angle
+    """
+    rotation_operation = Rotate(units=units)
+
+    return rotation_operation.evaluate(points=points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles)
+
+
+def variable_get_item(x:Variable, indices:np.ndarray):
+    """
+    Performs indexing of an m3l variable
+    """
+    # original_shape = x.shape
+    # if len(x.shape) > 1:
+    #     x_flat = x.reshape((np.prod(x.shape),))
+    # else:
+    #     x_flat = x
+
+    map_num_outputs = indices.shape[0]
+    map_num_inputs = x.shape[0]
+    map = sps.lil_matrix((map_num_outputs, map_num_inputs))
+    for i in range(map_num_outputs):
+        map[i, indices[i]] = 1
+
+    map = map.tocsc()
+
+    if len(x.shape) == 1:
+        indexed_x = matvec(map=map, x=x)
+    else:
+        indexed_x = matmat(map=map, x=x)
+
+    # if len(x.shape) > 1:
+    #     index_x = index_x_flat.reshape(original_shape)
+    # else:
+    #     index_x = index_x_flat
+
+    return indexed_x
+
+
+def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
+    """
+    Performs indexing/assignment of an m3l variable
+    """
+    # original_shape = x.shape
+    # if len(x.shape) > 1:
+    #     x_flat = x.reshape((np.prod(x.shape),))
+    # else:
+    #     x_flat = x
+
+    # updated component
+    map_num_outputs = x.shape[0]
+    map_num_inputs = indices.shape[0]
+    map = sps.lil_matrix((map_num_outputs, map_num_inputs))
+    for i in range(indices.shape[0]):
+        index = indices[i]
+        map[index, i] = 1
+    map = map.tocsc()
+    x_updated = matvec(map=map, x=value)
+
+    # unchanged component
+    data = np.ones((x.shape[0] - indices.shape[0],))
+    unchanged_indices = np.delete(np.arange(x.shape[0]), indices)
+    unchanged_indexing_map = sps.coo_matrix((data, (unchanged_indices, unchanged_indices)),
+                                shape=(x.shape[0], x.shape[0]))
+    unchanged_indexing_map = unchanged_indexing_map.tocsc()
+    x_unchanged = matvec(map=unchanged_indexing_map, x=x)
+
+    new_x = x_updated + x_unchanged
+
+    # if len(x.shape) > 1:
+    #     index_x = index_x_flat.reshape(original_shape)
+    # else:
+    #     index_x = index_x_flat
+
+    return new_x
