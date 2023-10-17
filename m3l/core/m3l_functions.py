@@ -80,9 +80,17 @@ def divide(x1 : Variable, x2 : Variable):
     """
     Performs division of two m3l variables, i.e., x1 / x2
     """
+    if type(x1) is int or type(x1) is float:
+        var1 = Variable('x1', shape=(1, ), value=x1)
+    else:
+        var1 = x1
+    if type(x2) is int or type(x2) is float:
+        var2 = Variable('x2', shape=(1, ), value=x2)
+    else:
+        var2 = x2
     division_operation = Division()
 
-    return division_operation.evaluate(x1=x1, x2=x2)
+    return division_operation.evaluate(x1=var1, x2=var2)
 
 def vstack(x1 : Variable, x2: Variable):
     """

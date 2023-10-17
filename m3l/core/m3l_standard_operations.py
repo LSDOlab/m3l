@@ -2,7 +2,7 @@ import csdl
 from m3l.core.m3l_classes import ExplicitOperation, Variable
 import numpy as np
 import scipy.sparse as sps
-from m3l.utils.utility_functions import replace_periods_with_underscores
+from m3l.utils.utility_functions import replace_periods_with_underscores, generate_random_string
 from python_csdl_backend import Simulator
 
 
@@ -49,6 +49,8 @@ class Norm(ExplicitOperation):
                 out_shape.append(size)
         out_shape = tuple(out_shape)
         
+        if len(out_shape) == 0:
+            out_shape = (1, )
         output_name = replace_periods_with_underscores(f'{x.name}_norm')
         norm = Variable(name=output_name, shape=out_shape, operation=self)
 
@@ -93,10 +95,12 @@ class Subtract(ExplicitOperation):
         y = x1_csdl - x2_csdl
         output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
         csdl_model.register_output(name=output_name, var=y)
+        csdl_model.print_var(y)
         return csdl_model
 
     def evaluate(self, x1 : Variable, x2 : Variable):
-        self.name = f'{x1.name}_minus_{x2.name}_operation'
+        random_name = generate_random_string()
+        self.name = f'{x1.name}_minus_{x2.name}_operation_{random_name}'
         self.arguments = {}
         self.arguments['x1'] = x1
         self.arguments['x2'] = x2
@@ -251,6 +255,8 @@ class Division(ExplicitOperation):
         x2 = self.arguments['x2']
 
         csdl_model = csdl.Model()
+        
+        # NOTE: can't divide by integer or float right now
         x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
         x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
 
@@ -487,6 +493,7 @@ class MatVec(ExplicitOperation):
     '''
     def initialize(self, kwargs):
         self.parameters.declare('name', types=str, default='dot_operation')
+        self.unique_name = ''
     
     def compute(self):
         '''
@@ -504,7 +511,7 @@ class MatVec(ExplicitOperation):
         map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value.toarray())
         x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape, val=x.value)
 
-        b = csdl.matvec(map_csdl, x_csdl)
+        b = csdl.matvec(map_csdl, x_csdl*1)
 
         output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
         operation_csdl.register_output(name=output_name, var=b)
@@ -543,8 +550,9 @@ class MatVec(ExplicitOperation):
             map_name = 'constant_map'
             map = m3l.Variable(name=map_name, shape=map.shape, operation=None, value=map)
 
-        self.name = f'{map.name}_multiplied_with_{x.name}_operation'
-
+        random_string = generate_random_string()
+        # self.name = f'{map.name}_multiplied_with_{x.name}_operation'
+        self.name = f'{map.name}_multiplied_with_{x.name}_operation_{random_string}'
         # Define operation arguments
         self.arguments = {'map' : map, 'x' : x}
 
