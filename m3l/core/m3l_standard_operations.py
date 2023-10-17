@@ -260,7 +260,16 @@ class Division(ExplicitOperation):
         x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
         x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
 
+        if x1.shape != x2.shape:
+            if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
+                x2_csdl = csdl.expand(x2_csdl, shape=x1.shape)
+            elif (x2.shape != (1, ) or x2.shape != (1, 1)) and (x1.shape == (1, ) or x1.shape == (1, 1)):
+                x1_csdl = csdl.expand(x1_csdl, shape=x2.shape)
+            else:
+                raise ValueError(f"Cannot resolve shapes of division for variable shapes {x1.shape} and {x2.shape}")
+        
         y = x1_csdl / x2_csdl
+        
         output_name = replace_periods_with_underscores( f'{x1.name}_divide_by_{x2.name}')
         csdl_model.register_output(name=output_name, var=y)
         return csdl_model
@@ -508,7 +517,7 @@ class MatVec(ExplicitOperation):
         x = self.arguments['x']
 
         operation_csdl = csdl.Model()
-        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value)
+        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value.toarray())
         x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape, val=x.value)
 
         b = csdl.matvec(map_csdl, x_csdl*1)
