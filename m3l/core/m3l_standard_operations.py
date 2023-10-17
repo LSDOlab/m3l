@@ -770,6 +770,10 @@ class Rotate(ExplicitOperation):
         '''
         import m3l
 
+        if len(points.shape) == 1:
+            print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
+            points = points.reshape((-1,3))
+
         if type(points) is np.ndarray:
             points_name = 'constant_points'
             points = m3l.Variable(name=points_name, shape=points.shape, operation=None, value=points)

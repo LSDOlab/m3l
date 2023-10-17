@@ -214,6 +214,20 @@ class Variable:
     scaler : Union[int, float, None] = None
     equals : Union[int, float, np.ndarray, None] = None
 
+    def __getitem__(self, indices):
+        import m3l
+        return m3l.variable_get_item(self, indices)
+
+    def __setitem__(self, indices, value):
+        import m3l
+        new_me = m3l.variable_set_item(self, indices, value)
+        self.name = new_me.name
+        self.operation = new_me.operation
+        self.value = new_me.value
+    
+    def __len__(self):
+        return self.shape[0]
+
     def __add__(self, other):
         import m3l
         return m3l.add(self, other)
@@ -244,6 +258,13 @@ class Variable:
         '''
         import m3l
         return m3l.reshape(self, shape)
+    
+    def copy(self):
+        '''
+        Returns a copy of the variable.
+        '''
+        import m3l
+        return m3l.copy(self)
 
 
 @dataclass
