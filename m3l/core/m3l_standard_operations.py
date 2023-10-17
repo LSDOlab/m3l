@@ -501,8 +501,8 @@ class MatVec(ExplicitOperation):
         x = self.arguments['x']
 
         operation_csdl = csdl.Model()
-        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape)
-        x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape)
+        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value)
+        x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape, val=x.value)
 
         b = csdl.matvec(map_csdl, x_csdl)
 
@@ -545,7 +545,87 @@ class MatVec(ExplicitOperation):
 
         self.name = f'{map.name}_multiplied_with_{x.name}_operation'
 
+        # Define operation arguments
+        self.arguments = {'map' : map, 'x' : x}
+
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
+        output_shape = (map.shape[0],)
+        output = Variable(name=output_name, shape=output_shape, operation=self)
         
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
+        sim['map'] = map.value
+        sim['x'] = x.value
+        sim.run()
+        output.value = sim[output_name]
+        
+        return output
+
+class MatMat(ExplicitOperation):
+    '''
+    Class for the matvec product operation.
+    '''
+    def initialize(self, kwargs):
+        self.parameters.declare('name', types=str, default='dot_operation')
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        map = self.arguments['map']
+        x = self.arguments['x']
+
+        operation_csdl = csdl.Model()
+        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape)
+        x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape)
+
+        b = csdl.matmat(map_csdl, x_csdl)
+
+        output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
+        operation_csdl.register_output(name=output_name, var=b)
+
+        return operation_csdl
+
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self, map:Variable, x:Variable) -> Variable:
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        import m3l
+        if type(map) is np.ndarray or sps.isspmatrix(map):
+            map_name = 'constant_map'
+            map = m3l.Variable(name=map_name, shape=map.shape, operation=None, value=map)
+
+        self.name = f'{map.name}_multiplied_with_{x.name}_operation'
 
         # Define operation arguments
         self.arguments = {'map' : map, 'x' : x}
@@ -559,6 +639,246 @@ class MatVec(ExplicitOperation):
         operation_csdl = self.compute()
         sim = Simulator(operation_csdl)
         sim['map'] = map.value
+        sim['x'] = x.value
+        sim.run()
+        output.value = sim[output_name]
+        
+        return output
+
+
+class Rotate(ExplicitOperation):
+    '''
+    Class for the rotate operation.
+    '''
+    def initialize(self, kwargs):
+        self.parameters.declare('name', types=str, default='rotate_operation')
+        self.parameters.declare('units', types=str, default='degrees')
+
+    def assign_attributes(self):
+        self.units = self.parameters['units']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the rotation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        points = self.arguments['points']
+        axis_origin = self.arguments['axis_origin']
+        axis_vector = self.arguments['axis_vector']
+        angles = self.arguments['angles']
+
+        operation_csdl = csdl.Model()
+        points_csdl = operation_csdl.declare_variable(name='points', shape=points.shape)
+        axis_origin_csdl = operation_csdl.declare_variable(name='axis_origin', shape=axis_origin.shape)
+        axis_vector_csdl = operation_csdl.declare_variable(name='axis_vector', shape=axis_vector.shape)
+        angles_csdl = operation_csdl.declare_variable(name='angles', shape=angles.shape)
+
+        num_points = np.prod(points.shape[:-1])
+        num_angles = np.prod(angles.shape)
+
+        normalized_axis = axis_vector_csdl / csdl.expand(csdl.pnorm(axis_vector_csdl), axis_vector_csdl.shape, 'i->ij')
+        normalized_axis = csdl.reshape(normalized_axis, new_shape=(normalized_axis.shape[-1],))
+
+        angles_flattened = csdl.reshape(angles_csdl, new_shape=((num_angles,))) # This rotate only works for 3D rotations
+
+        # Translate control points into actuation origin frame
+        axis_origin_csdl_expanded = csdl.expand(csdl.reshape(axis_origin_csdl, new_shape=(axis_origin_csdl.shape[-1],)),
+                                                shape=(num_points,axis_origin_csdl.shape[-1]), indices='i->ji')
+        points_origin_frame = points_csdl - axis_origin_csdl_expanded
+
+        # Construct quaternion from rotation value
+        rotated_points_flattened = operation_csdl.create_output(
+                name='rotated_points_flattened', shape=(num_angles*num_points,) + points.shape[-1:])
+        angle_counter = 0
+        for i in range(len(angles.shape)):
+            for t in range(angles.shape[i]):
+                rotation_value = angles_flattened[angle_counter]
+                if self.units == 'degrees':
+                    rotation_value = rotation_value * np.pi/180
+
+                quaternion = operation_csdl.create_output(f'quat_{t}', shape=(num_points,) + (4,))
+                quaternion[:, 0] = csdl.expand(csdl.cos(rotation_value / 2), (num_points,) + (1,), 'i->ij')
+                quaternion[:, 1] = csdl.expand(csdl.sin(rotation_value / 2) * normalized_axis[0], (num_points,) + (1,), 'i->ij')
+                quaternion[:, 2] = csdl.expand(csdl.sin(rotation_value / 2) * normalized_axis[1], (num_points,) + (1,), 'i->ij')
+                quaternion[:, 3] = csdl.expand(csdl.sin(rotation_value / 2) * normalized_axis[2], (num_points,) + (1,), 'i->ij')
+
+                # Apply rotation
+                rotated_points_origin_frame = csdl.quatrotvec(quaternion, points_origin_frame)
+
+                # Translate rotated control points back into original coordinate frame
+                rotated_points_t = rotated_points_origin_frame + axis_origin_csdl_expanded
+
+                rotated_points_flattened[angle_counter*num_points:(angle_counter+1)*num_points,:] = rotated_points_t
+
+                angle_counter += 1
+        
+        rotated_points = csdl.reshape(rotated_points_flattened, new_shape=(angles.shape + points.shape))
+
+        output_name = replace_periods_with_underscores(
+            f'{points.name}_rotated_by_{angles.name}_about_{axis_vector.name}_at_point_{axis_origin.name}')
+        operation_csdl.register_output(name=output_name, var=rotated_points)
+
+        return operation_csdl
+
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self, points:Variable, axis_origin:Variable, axis_vector:Variable, angles:Variable) -> Variable:
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        import m3l
+
+        if type(points) is np.ndarray:
+            points_name = 'constant_points'
+            points = m3l.Variable(name=points_name, shape=points.shape, operation=None, value=points)
+
+        if type(axis_origin) is np.ndarray:
+            axis_origin_name = 'constant_axis_origin'
+            axis_origin = m3l.Variable(name=axis_origin_name, shape=axis_origin.shape, operation=None, value=axis_origin)
+        
+        if type(axis_vector) is np.ndarray:
+            axis_vector_name = 'constant_axis_vector'
+            axis_vector = m3l.Variable(name=axis_vector_name, shape=axis_vector.shape, operation=None, value=axis_vector)
+
+        if type(angles) is float or type(angles) is int:
+            angles = m3l.Variable(name='constant_angle', shape=(1,), operation=None, value=angles)
+        elif type(angles) is np.ndarray:
+            angles_name = 'constant_angles'
+            angles = m3l.Variable(name=angles_name, shape=angles.shape, operation=None, value=angles)
+        
+        self.name = f'{points.name}_rotated_by_{angles.name}_about_{axis_vector.name}_at_point_{axis_origin.name}_operation'
+
+        # Define operation arguments
+        self.arguments = {'points' : points, 'axis_origin' : axis_origin, 'axis_vector':axis_vector, 'angles' : angles}
+
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(
+            f'{points.name}_rotated_by_{angles.name}_about_{axis_vector.name}_at_point_{axis_origin.name}')
+        
+        if len(angles.shape) > 1 or angles.shape[0] > 1:
+            output_shape = angles.shape + points.shape
+        else:
+            output_shape = points.shape
+
+        output = Variable(name=output_name, shape=output_shape, operation=self)
+        
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
+        sim['points'] = points.value
+        sim['axis_origin'] = axis_origin.value
+        sim['axis_vector'] = axis_vector.value
+        sim['angles'] = angles.value
+        sim.run()
+        output.value = sim[output_name]
+        
+        return output
+    
+
+class GetItem(ExplicitOperation):
+    '''
+    Class for the indexing operation.
+    '''
+    def initialize(self, kwargs):
+        self.parameters.declare('name', types=str, default='rotate_operation')
+        self.parameters.declare('indices', types=tuple)
+
+    def assign_attributes(self):
+        self.indices = self.parameters['indices']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the indexing operation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        x = self.arguments['x']
+        indices = self.indices
+
+        operation_csdl = csdl.Model()
+        x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape)
+
+
+
+        x_indexed = x_csdl[indices]
+
+
+        output_name = replace_periods_with_underscores(f'{x.name}[{self.indices}]')
+        operation_csdl.register_output(name=output_name, var=x_indexed)
+
+        return operation_csdl
+
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self, x:Variable) -> Variable:
+        '''
+        User-facing method that the user will call to index a Variable.
+
+        Parameters
+        ----------
+        x : Variable
+            The variable to be indexed.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+
+        self.name = f'{x.name}[{self.indices}]_operation'
+
+        # Define operation arguments
+        self.arguments = {'x' : x}
+
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(f'{x.name}[{self.indices}]')
+        
+        output_shape = tuple([len(self.indices)] + list(x.shape))
+
+        output = Variable(name=output_name, shape=output_shape, operation=self)
+        
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
         sim['x'] = x.value
         sim.run()
         output.value = sim[output_name]
