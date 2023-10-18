@@ -1239,6 +1239,7 @@ class DynamicModel(Model):
                             profile_outputs:list=None, 
                             profile_system=None, 
                             profile_parameters:dict=None,
+                            copycat_profile:bool=False,
                             post_processor=None,
                             pp_vars:list=None):
         self.initial_conditions = initial_conditions
@@ -1249,6 +1250,7 @@ class DynamicModel(Model):
         self.profile_outputs = profile_outputs
         self.profile_system = profile_system
         self.profile_parameters = profile_parameters
+        self.copycat_profile = copycat_profile
         self.approach = approach
         self.post_processor = post_processor
         self.pp_vars = pp_vars
@@ -1287,6 +1289,10 @@ class DynamicModel(Model):
                                 # output=residual_names[i][0]+'_integrated')
         ode_prob.add_times(step_vector='h')
         ode_prob.set_ode_system(AssembledODEModel)
+        # profile outputs
+        if self.copycat_profile:
+            self.profile_system = AssembledODEModel
+            self.profile_parameters = {'operations':self.operations}
         if self.profile_outputs is not None:
             for profile_output in self.profile_outputs:
                 ode_prob.add_profile_output(profile_output[0], shape=profile_output[1])
