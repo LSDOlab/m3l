@@ -493,7 +493,11 @@ class MatVec(ExplicitOperation):
     '''
     def initialize(self, kwargs):
         self.parameters.declare('name', types=str, default='dot_operation')
+        self.parameters.declare('map', types=(np.ndarray, sps.csc_matrix))
         self.unique_name = ''
+
+    def assign_attributes(self):
+        self.map = self.parameters['map']
     
     def compute(self):
         '''
@@ -504,16 +508,16 @@ class MatVec(ExplicitOperation):
         csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
             The csdl model or module that computes the model/operation outputs.
         '''
-        map = self.arguments['map']
+        map = self.map
         x = self.arguments['x']
 
         operation_csdl = csdl.Model()
-        map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value.toarray())
+        # map_csdl = operation_csdl.declare_variable(name='map', shape=map.shape, val=map.value.toarray())
         x_csdl = operation_csdl.declare_variable(name='x', shape=x.shape, val=x.value)
 
-        b = csdl.matvec(map_csdl, x_csdl*1)
+        b = csdl.matvec(map, x_csdl*1)
 
-        output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
+        output_name = replace_periods_with_underscores(f'{x.name}_matvec')
         operation_csdl.register_output(name=output_name, var=b)
 
         return operation_csdl
@@ -531,14 +535,16 @@ class MatVec(ExplicitOperation):
         '''
         pass
 
-    def evaluate(self, map:Variable, x:Variable) -> Variable:
+    def evaluate(self, x:Variable) -> Variable:
         '''
         User-facing method that the user will call to define a model evaluation.
 
         Parameters
         ----------
-        mesh : Variable
-            The mesh over which the function will be evaluated.
+        map : sps.csc_matrix
+            The matrix in the matrix-vector product.
+        x : Variable
+            The vector in the matrix-vector product.
 
         Returns
         -------
@@ -546,25 +552,27 @@ class MatVec(ExplicitOperation):
             The values of the function at the mesh locations.
         '''
         import m3l
-        if type(map) is np.ndarray or sps.isspmatrix(map):
-            map_name = 'constant_map'
-            map = m3l.Variable(name=map_name, shape=map.shape, operation=None, value=map)
+        # if type(map) is np.ndarray or sps.isspmatrix(map):
+        #     map_name = 'constant_map'
+        #     map = m3l.Variable(name=map_name, shape=map.shape, operation=None, value=map)
 
         random_string = generate_random_string()
         # self.name = f'{map.name}_multiplied_with_{x.name}_operation'
-        self.name = f'{map.name}_multiplied_with_{x.name}_operation_{random_string}'
+        # self.name = f'{map.name}_multiplied_with_{x.name}_operation_{random_string}'
+        self.name = f'{x.name}_matvec_operation_{random_string}'
         # Define operation arguments
-        self.arguments = {'map' : map, 'x' : x}
+        # self.arguments = {'map' : map, 'x' : x}
+        self.arguments = {'x' : x}
 
         # Create the M3L variables that are being output
-        output_name = replace_periods_with_underscores(f'{map.name}_multiplied_with_{x.name}')
-        output_shape = (map.shape[0],)
+        output_name = replace_periods_with_underscores(f'{x.name}_matvec')
+        output_shape = (self.map.shape[0],)
         output = Variable(name=output_name, shape=output_shape, operation=self)
         
         # create csdl model for in-line evaluations
         operation_csdl = self.compute()
         sim = Simulator(operation_csdl)
-        sim['map'] = map.value
+        # sim['map'] = map.value
         sim['x'] = x.value
         sim.run()
         output.value = sim[output_name]
