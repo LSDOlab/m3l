@@ -1395,10 +1395,14 @@ class AssembledODEModel(ModuleCSDL):
                 promotions = operation.ode_parameters
                 for i in range(len(operation.residual_names)):
                     promotions += [operation.residual_names[i][0], operation.residual_names[i][1]]
+                # if issubclass(type(operation_csdl), csdl.Model):
+                #     self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
+                # elif issubclass(type(operation_csdl), ModuleCSDL):
+                #     self.add_module(submodule=operation_csdl, name=operation_name, promotes=promotions)
                 if issubclass(type(operation_csdl), csdl.Model):
-                    self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
+                    self.add(submodel=operation_csdl, name=operation_name)
                 elif issubclass(type(operation_csdl), ModuleCSDL):
-                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=promotions)
+                    self.add_module(submodule=operation_csdl, name=operation_name)
                 else:
                     raise Exception(f"{operation.name}'s compute_residual() method is returning an invalid model type.")
 
