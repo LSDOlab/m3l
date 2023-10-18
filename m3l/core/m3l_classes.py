@@ -953,8 +953,15 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     if is_dataclass(value):
                         self.register_output(value, string_name=string_name)
                     
+                    elif isinstance(value, dict):
+                        self.register_output(value, string_name=string_name)
+
+                    elif isinstance(value, list):
+                        self.register_output(value, string_name=string_name)
+
                     elif not isinstance(value, Variable):
                         pass
+
                     else:
                         if value.operation:
                             name = f'{string_name}_{value.operation.name}_{key}'
@@ -966,6 +973,12 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             else:
                 for key, value in attributes.items():
                     if is_dataclass(value):
+                        self.register_output(value)
+
+                    elif isinstance(value, dict):
+                        self.register_output(value)
+
+                    elif isinstance(value, list):
                         self.register_output(value)
 
                     elif not isinstance(value, Variable):
@@ -1100,10 +1113,10 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                             if input.operation is not None: # If the input is associated with an operation
                                     model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
                             else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
-                                if input in self.user_inputs:
-                                    model_csdl.connect(input.name, operation_name+"."+input_name) 
-                                else:
-                                    pass
+                                if input not in self.user_inputs:
+                                    model_csdl.create_input(input.name, val=input.value)
+
+                                model_csdl.connect(input.name, operation_name+"."+input_name) 
                     
                                        
             if issubclass(type(operation), ImplicitOperation):
