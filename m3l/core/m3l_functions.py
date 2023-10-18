@@ -150,7 +150,6 @@ def linear_combination(start : Variable, stop : Variable, num_steps:int=50,
     flattened_output = mapped_start_array + mapped_stop_array
 
     output = flattened_output.reshape((num_steps,) + tuple(start.shape))
-    print('OUTPUT NAME', output.name)
     # output.name = f'{start.name}_to_{stop.name}_linear_combination'
 
     return output
@@ -179,13 +178,13 @@ def linspace(start:Variable, stop:Variable, num_steps:int=50) -> Variable:
                               start_weights=start_weights, stop_weights=stop_weights)
 
 
-def matvec(map : Variable, x : Variable):
+def matvec(map : sps.csc_matrix, x : Variable):
     """
     Performs matrix-vector multiplication of two m3l variables
     """
-    matvec_operation = MatVec()
+    matvec_operation = MatVec(map=map)
 
-    return matvec_operation.evaluate(map=map, x=x)
+    return matvec_operation.evaluate(x=x)
 
 def matmat(map : Variable, x : Variable):
     """
