@@ -150,7 +150,8 @@ def linear_combination(start : Variable, stop : Variable, num_steps:int=50,
     flattened_output = mapped_start_array + mapped_stop_array
 
     output = flattened_output.reshape((num_steps,) + tuple(start.shape))
-    output.name = f'{start.name}_to_{stop.name}_linear_combination'
+    print('OUTPUT NAME', output.name)
+    # output.name = f'{start.name}_to_{stop.name}_linear_combination'
 
     return output
 

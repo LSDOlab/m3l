@@ -95,7 +95,7 @@ class Subtract(ExplicitOperation):
         y = x1_csdl - x2_csdl
         output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
         csdl_model.register_output(name=output_name, var=y)
-        csdl_model.print_var(y)
+        # csdl_model.print_var(y)
         return csdl_model
 
     def evaluate(self, x1 : Variable, x2 : Variable):
