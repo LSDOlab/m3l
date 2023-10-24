@@ -37,7 +37,7 @@ from m3l.core.csdl_operations import Eig, EigExplicit
 #     arguments : dict
 
 
-class Operation(OperationBase):
+class Operation(Module):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -214,6 +214,7 @@ class Variable:
     scaler : Union[int, float, None] = None
     equals : Union[int, float, np.ndarray, None] = None
 
+
     def __getitem__(self, indices):
         import m3l
         return m3l.variable_get_item(self, indices)
@@ -232,13 +233,23 @@ class Variable:
         import m3l
         return m3l.add(self, other)
     
+    def __radd__(self, other):
+        return self.__add__(other=other)
+    
     def __sub__(self, other):
         import m3l
         return m3l.subtract(self, other)
     
+    def __rsub__(self, other):
+        print('RSUB!!!', other)
+        return -1*self.__sub__(other=other)
+    
     def __mul__(self, other):
         import m3l
         return m3l.multiply(self, other)
+    
+    def __rmul__(self, other):
+        return self.__mul__(other=other)
     
     def __truediv__(self, other):
         import m3l
@@ -246,6 +257,10 @@ class Variable:
     
     def __str__(self):
         return str(self.value)
+    
+    def __pow__(self, other):
+        import m3l
+        return m3l.power(self, other)
     
     def reshape(self, shape:tuple):
         '''
