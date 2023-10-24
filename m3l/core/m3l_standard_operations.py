@@ -77,222 +77,152 @@ class Norm(ExplicitOperation):
 
 class Power(ExplicitOperation):
     def initialize(self, kwargs):
-        self.parameters.declare('name', types=str, default='power_operation')
+        self.parameters.declare('name', default='subtraction_operation', types=str)
 
     def assign_attributes(self):
         self.name = self.parameters['name']
 
     def compute(self):
-        x1 = self.arguments['x1']
-        x2 = self.arguments['x2']
+        scalers = self.scalers
+        arguments = self.arguments
 
+        x1 = arguments['x1']
+        x2 = scalers['x2']
         csdl_model = csdl.Model()
-        
-        if isinstance(x1, (int, float)):
-            x1_csdl = csdl_model.create_input(name='x1', shape=x2.shape, val=x1)
-            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable('x1', shape=x1.shape)
+        y = x1_csdl**x2
 
-            y = x1_csdl**x2_csdl
-            output_name = replace_periods_with_underscores(f'{self.string}_to_the_power_{x2.name}')
-            csdl_model.register_output(name=output_name, var=y)
+        output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_scaler')
+        csdl_model.register_output(output_name, y)
 
-        elif isinstance(x2, (int, float)):
-            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.create_input(name='x2', shape=x1.shape, val=x2)
-            
-            y = x1_csdl**x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_{self.string}')
-            csdl_model.register_output(name=output_name, var=y)
-
-        else:
-            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
-
-            if x1.shape != x2.shape:
-                if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
-                    x2_csdl = csdl.expand(x2_csdl, shape=x1.shape)
-                elif (x2.shape != (1, ) or x2.shape != (1, 1)) and (x1.shape == (1, ) or x1.shape == (1, 1)):
-                    x1_csdl = csdl.expand(x1_csdl, shape=x2.shape)
-                else:
-                    raise ValueError(f"Cannot resolve shapes of power operation for variable shapes {x1.shape} and {x2.shape}")
-
-            y = x1_csdl**x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_{x2.name}')
-            csdl_model.register_output(name=output_name, var=y)
-        
         return csdl_model
 
     def evaluate(self, x1 : Variable, x2 : Variable):
-        if isinstance(x1, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{string}_power_{x2.name}_operation'
-            
-            output_name = replace_periods_with_underscores(f'{string}_to_the_power_{x2.name}')
-            function_values = Variable(name=output_name, shape=x2.shape, operation=self)
+        random_name = generate_random_string()
+        self.name = f'{x1.name}_to_the_power_operation_{random_name}'
 
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name]
-
-            
-
-        elif isinstance(x2, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{x1.name}_power_{string}_operation'
-
-            output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_{string}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2
-            sim.run()
-            function_values.value = sim[output_name] 
-
-            
+        if not isinstance(x1, Variable):
+            raise ValueError(f"Base of exponenent operation has to be an m3l.Variable. Received type {type(x1)}")
+        elif isinstance(x2, Variable):
+            raise ValueError(f"Cannot raise an m3l variable to the power of another m3l variable yet")
+        
         else:
-            self.name = f'{x1.name}_power_{x2.name}_operation'
-            output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_{x2.name}')
+            self.scalers = {}
+            self.arguments = {}
+            self.scalers['x2'] = x2
+            self.arguments['x1'] = x1
+            
+            output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_scaler')
             function_values = Variable(name=output_name, shape=x1.shape, operation=self)
 
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name] 
-
-        return function_values
+            return function_values
 
 class Subtract(ExplicitOperation):
     def initialize(self, kwargs):
-        self.parameters.declare('name', types=str, default='addition_operation')
+        self.parameters.declare('name', default='subtraction_operation', types=str)
 
     def assign_attributes(self):
         self.name = self.parameters['name']
 
     def compute(self):
-        x1 = self.arguments['x1']
-        x2 = self.arguments['x2']
+        scalers = self.scalers
+        arguments = self.arguments
 
-        csdl_model = csdl.Model()
-        
-        if isinstance(x1, (int, float)):
-            x1_csdl = csdl_model.create_input(name='x1', shape=x2.shape, val=x1)
+        if 'x1' in scalers:
+            x1 = scalers['x1']
+            x2 = arguments['x2']
+            csdl_model = csdl.Model()
             x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+            y = x1 - x2_csdl
 
-            y = x1_csdl - x2_csdl
-            output_name = replace_periods_with_underscores(f'{self.string}_minus_{x2.name}')
+            output_name = replace_periods_with_underscores(f'scaler_minus_{x2.name}')
             csdl_model.register_output(name=output_name, var=y)
 
-        elif isinstance(x2, (int, float)):
+        elif 'x2' in scalers:
+            x1 = arguments['x1']
+            x2 = scalers['x2']
+            csdl_model = csdl.Model()
             x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.create_input(name='x2', shape=x1.shape, val=x2)
-            
-            y = x1_csdl - x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_minus_{self.string}')
-            csdl_model.register_output(name=output_name, var=y)
+            y = x1_csdl - x2
 
+            output_name = replace_periods_with_underscores(f'{x1.name}_minus_scaler')
+            csdl_model.register_output(name=output_name, var=y)
         else:
+            x1 = self.arguments['x1']
+            x2 = self.arguments['x2']
+
+            csdl_model = csdl.Model()
             x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
             x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
-
-            if x1.shape != x2.shape:
-                if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
-                    x2_csdl = csdl.expand(x2_csdl, shape=x1.shape)
-                elif (x2.shape != (1, ) or x2.shape != (1, 1)) and (x1.shape == (1, ) or x1.shape == (1, 1)):
-                    x1_csdl = csdl.expand(x1_csdl, shape=x2.shape)
-                else:
-                    raise ValueError(f"Cannot resolve shapes of subtraction for variable shapes {x1.shape} and {x2.shape}")
 
             y = x1_csdl - x2_csdl
             output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
             csdl_model.register_output(name=output_name, var=y)
+        
+        # csdl_model.print_var(y)
         
         return csdl_model
 
     def evaluate(self, x1 : Variable, x2 : Variable):
+        random_name = generate_random_string()
         if isinstance(x1, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{string}_subtraction_{x2.name}_operation'
-            
-            output_name = replace_periods_with_underscores(f'{string}_minus_{x2.name}')
+            self.name = f'scaler_minus_{x2.name}_operation_{random_name}'
+            self.arguments = {}
+            self.scalers = {}
+            self.scalers['x1'] = x1
+            self.arguments['x2'] = x2
+
+            output_name = replace_periods_with_underscores(f'scaler_minus_{x2.name}')
             function_values = Variable(name=output_name, shape=x2.shape, operation=self)
+            
+            # NOTE: in-line evaluations only work if all solver developers implement them
+            # create csdl model for in-line evaluations
+            # operation_csdl = self.compute()
+            # sim = Simulator(operation_csdl)
+            # sim['x2'] = x2.value
+            # sim.run()
+            # function_values.value = sim[output_name]
 
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
+        elif isinstance(x2, (float, int)):
+            self.name = f'{x1.name}_minus_scaler_operation_{random_name}'
+            self.arguments = {}
+            self.scalers = {}
+            self.scalers['x2'] = x2
+            self.arguments['x1'] = x1
 
+            output_name = replace_periods_with_underscores(f'{x1.name}_minus_scaler')
+            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
+            
+            # create csdl model for in-line evaluations
+            # operation_csdl = self.compute()
+            # sim = Simulator(operation_csdl)
+            # print(sim['x1'].shape)
+            # print(x1.shape)
+            # print(x1.value)
+            # print(x1.name)
+            # sim['x1'] = x1.value
+            # sim.run()
+            # function_values.value = sim[output_name]
+        
+        else:
+            self.name = f'{x1.name}_minus_{x2.name}_operation_{random_name}'
+            self.arguments = {}
+            self.scalers = {}
+            self.arguments['x1'] = x1
+            self.arguments['x2'] = x2
+
+            output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
+            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
+            
             # create csdl model for in-line evaluations
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim['x1'] = x1
+            sim['x1'] = x1.value
             sim['x2'] = x2.value
             sim.run()
             function_values.value = sim[output_name]
 
-            
-
-        elif isinstance(x2, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{x1.name}_subtraction_{string}_operation'
-
-            output_name = replace_periods_with_underscores(f'{x1.name}_minus_{string}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2
-            sim.run()
-            function_values.value = sim[output_name] 
-
-            
-        else:
-            self.name = f'{x1.name}_subtraction_{x2.name}_operation'
-            output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name] 
-
+        
         return function_values
 
     def compute_derivates(self):
@@ -316,39 +246,13 @@ class Add(ExplicitOperation):
         x2 = self.arguments['x2']
 
         csdl_model = csdl.Model()
-        
-        if isinstance(x1, (int, float)):
-            x1_csdl = csdl_model.create_input(name='x1', shape=x2.shape, val=x1)
-            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
+        x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
 
-            y = x1_csdl + x2_csdl
-            output_name = replace_periods_with_underscores(f'{self.string}_plus_{x2.name}')
-            csdl_model.register_output(name=output_name, var=y)
-
-        elif isinstance(x2, (int, float)):
-            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.create_input(name='x2', shape=x1.shape, val=x2)
-            
-            y = x1_csdl + x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_plus_{self.string}')
-            csdl_model.register_output(name=output_name, var=y)
-
-        else:
-            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
-
-            if x1.shape != x2.shape:
-                if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
-                    x2_csdl = csdl.expand(x2_csdl, shape=x1.shape)
-                elif (x2.shape != (1, ) or x2.shape != (1, 1)) and (x1.shape == (1, ) or x1.shape == (1, 1)):
-                    x1_csdl = csdl.expand(x1_csdl, shape=x2.shape)
-                else:
-                    raise ValueError(f"Cannot resolve shapes of addition for variable shapes {x1.shape} and {x2.shape}")
-
-            y = x1_csdl + x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_plus_{x2.name}')
-            csdl_model.register_output(name=output_name, var=y)
-        
+        y = x1_csdl + x2_csdl
+        output_name = replace_periods_with_underscores(f'{x1.name}_plus_{x2.name}')
+        # output_name = f'x2_plus_x1'
+        csdl_model.register_output(name=output_name, var=y)
         return csdl_model
 
     def compute_derivates(self):
@@ -378,67 +282,30 @@ class Add(ExplicitOperation):
         function_values : Variable
             The values of the function at the mesh locations.
         '''
-        if isinstance(x1, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{string}_addition_{x2.name}_operation'
-            
-            output_name = replace_periods_with_underscores(f'{string}_plus_{x2.name}')
-            function_values = Variable(name=output_name, shape=x2.shape, operation=self)
+        self.name = f'{x1.name}_plus_{x2.name}_operation'
+        self.parameters['name'] = self.name
+        # self.x1 = x1
+        # self.x2 = x2
 
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
+        # Define operation arguments
+        self.arguments = {'x1' : x1, 'x2' : x2}
+    
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(f'{x1.name}_plus_{x2.name}')
+        function_values = Variable(name=output_name, shape=x1.shape, operation=self)
+    
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
+        sim['x1'] = x1.value
+        sim['x2'] = x2.value
+        sim.run()
+        function_values.value = sim[output_name]
 
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name]
 
-            
-
-        elif isinstance(x2, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{x1.name}_addition_{string}_operation'
-
-            output_name = replace_periods_with_underscores(f'{x1.name}_plus_{string}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2
-            sim.run()
-            function_values.value = sim[output_name] 
-
-            
-        else:
-            self.name = f'{x1.name}_addition_{x2.name}_operation'
-            output_name = replace_periods_with_underscores(f'{x1.name}_plus_{x2.name}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name] 
-
+        
         return function_values
+
 
 class Multiplication(ExplicitOperation):
     """
@@ -452,105 +319,32 @@ class Multiplication(ExplicitOperation):
         x2 = self.arguments['x2']
 
         csdl_model = csdl.Model()
-        
-        if isinstance(x1, (int, float)):
-            x1_csdl = csdl_model.create_input(name='x1', shape=x2.shape, val=x1)
-            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
+        x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
 
-            y = x1_csdl * x2_csdl
-            output_name = replace_periods_with_underscores(f'{self.string}_times_{x2.name}')
-            csdl_model.register_output(name=output_name, var=y)
-
-        elif isinstance(x2, (int, float)):
-            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.create_input(name='x2', shape=x1.shape, val=x2)
-            
-            y = x1_csdl * x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_times_{self.string}')
-            csdl_model.register_output(name=output_name, var=y)
-
-        else:
-            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
-
-            if x1.shape != x2.shape:
-                if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
-                    x2_csdl = csdl.expand(x2_csdl, shape=x1.shape)
-                elif (x2.shape != (1, ) or x2.shape != (1, 1)) and (x1.shape == (1, ) or x1.shape == (1, 1)):
-                    x1_csdl = csdl.expand(x1_csdl, shape=x2.shape)
-                else:
-                    raise ValueError(f"Cannot resolve shapes of division for variable shapes {x1.shape} and {x2.shape}")
-
-            y = x1_csdl * x2_csdl
-            output_name = replace_periods_with_underscores(f'{x1.name}_times_{x2.name}')
-            csdl_model.register_output(name=output_name, var=y)
-        
+        y = x1_csdl * x2_csdl
+        output_name = replace_periods_with_underscores(f'{x1.name}_times_{x2.name}')
+        csdl_model.register_output(name=output_name, var=y)
         return csdl_model
     
     def evaluate(self, x1 : Variable, x2 : Variable) -> Variable:
-        if isinstance(x1, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{string}_multiplication_{x2.name}_operation'
-            
-            output_name = replace_periods_with_underscores(f'{string}_times_{x2.name}')
-            function_values = Variable(name=output_name, shape=x2.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name]
-
-            
-
-        elif isinstance(x2, (float, int)):
-            string = generate_random_string(5)
-            self.string = string
-            self.name = f'{x1.name}_multiplication_{string}_operation'
-
-            output_name = replace_periods_with_underscores(f'{x1.name}_times_{string}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2
-            sim.run()
-            function_values.value = sim[output_name] 
-
-            
-        else:
-            self.name = f'{x1.name}_multiplication_{x2.name}_operation'
-            output_name = replace_periods_with_underscores(f'{x1.name}_times_{x2.name}')
-            function_values = Variable(name=output_name, shape=x1.shape, operation=self)
-
-            self.parameters['name'] = self.name
-            # Define operation arguments
-            self.arguments = {'x1' : x1, 'x2' : x2}
-
-            # create csdl model for in-line evaluations
-            operation_csdl = self.compute()
-            sim = Simulator(operation_csdl)
-            sim['x1'] = x1.value
-            sim['x2'] = x2.value
-            sim.run()
-            function_values.value = sim[output_name] 
+        self.name = f'{x1.name}_multiplication_{x2.name}_operation'
+        self.parameters['name'] = self.name
         
-            
+        # Define operation arguments
+        self.arguments = {'x1' : x1, 'x2' : x2}
 
-       
+        # Create the M3L variables that are being output
+        output_name = replace_periods_with_underscores(f'{x1.name}_times_{x2.name}')
+        function_values = Variable(name=output_name, shape=x1.shape, operation=self)
+
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
+        sim['x1'] = x1.value
+        sim['x2'] = x2.value
+        sim.run()
+        function_values.value = sim[output_name]
 
         return function_values
 
@@ -700,7 +494,7 @@ class CrossProduct(ExplicitOperation):
         x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
         x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
 
-        y = csdl.cross(x1_csdl*1, x2_csdl, axis=self.axis)
+        y = csdl.cross(x1_csdl, x2_csdl, axis=self.axis)
         output_name = replace_periods_with_underscores(f'{x1.name}_cross_{x2.name}')
         csdl_model.register_output(name=output_name, var=y)
 

@@ -37,7 +37,7 @@ from m3l.core.csdl_operations import Eig, EigExplicit
 #     arguments : dict
 
 
-class Operation(Module):
+class Operation(OperationBase):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -241,7 +241,6 @@ class Variable:
         return m3l.subtract(self, other)
     
     def __rsub__(self, other):
-        print('RSUB!!!', other)
         return -1*self.__sub__(other=other)
     
     def __mul__(self, other):
