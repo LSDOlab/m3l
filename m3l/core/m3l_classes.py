@@ -11,6 +11,7 @@ from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
 from lsdo_modules.module.module import Module
 from typing import Union
 from m3l.utils.base_class import OperationBase
+from ozone.api import ODEProblem
 
 from m3l.core.csdl_operations import Eig, EigExplicit
 
@@ -234,7 +235,7 @@ class Variable:
         return m3l.add(self, other)
     
     def __radd__(self, other):
-        return self.__add__(other=other)
+            return self.__add__(other=other)
     
     def __sub__(self, other):
         import m3l
@@ -529,6 +530,11 @@ class IndexedFunction:
             value.operation = inverse_operation
         return self.coefficients
     
+    def evaluate_normals(self, indexed_parametric_coordinates, name:str=None):
+        function_evaluation_model = IndexedFunctionNormalEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates, name=name)
+        function_values = function_evaluation_model.evaluate()
+        return function_values
+    
     def compute(self, indexed_parametric_coordinates, coefficients):
         associated_coords = {}
         index = 0
@@ -563,7 +569,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         self.function = self.parameters['function']
         self.indexed_mesh = self.parameters['indexed_parametric_coordinates']
     
-    def compute(self):
+    def compute(self, num_nodes:int=1):
         '''
         Creates the CSDL model to compute the function evaluation.
 
@@ -671,6 +677,133 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
         return function_values
     
+
+class IndexedFunctionNormalEvaluation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('function', types=IndexedFunction)
+        self.parameters.declare('indexed_parametric_coordinates', types=list)
+        self.parameters.declare('name', types=str, allow_none=True)
+
+    def assign_attributes(self):
+        '''
+        Assigns class attributes to make class more like standard python class.
+        '''
+        self.function = self.parameters['function']
+        self.indexed_mesh = self.parameters['indexed_parametric_coordinates']
+        self.input_name = self.parameters['name']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+
+        associated_coords = {}
+        index = 0
+        for item in self.indexed_mesh:
+            key = item[0]
+            value = item[1]
+            if key not in associated_coords.keys():
+                associated_coords[key] = [[index], value]
+            else:
+                associated_coords[key][0].append(index)
+                associated_coords[key] = [associated_coords[key][0], np.vstack((associated_coords[key][1], value))]
+            index += 1
+
+        output_name = f'evaluated_normal_{self.function.name}'
+        if not self.input_name is None:
+            output_name = output_name + '_' + self.input_name
+        output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
+        csdl_map = ModuleCSDL()
+        points = csdl_map.create_output(output_name, shape=output_shape)
+        
+        coefficients_csdl = {} 
+        for key, coefficients in self.function.coefficients.items():
+            num_coefficients = np.prod(coefficients.shape[:-1])
+            if coefficients.value is None:
+                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
+            else:
+                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+                                                                    val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+
+        for key, value in associated_coords.items():
+            evaluation_matrix_u = self.function.space.spaces[key].compute_evaluation_map(value[1], parametric_derivative_order=(1,0))
+            evaluation_matrix_v = self.function.space.spaces[key].compute_evaluation_map(value[1], parametric_derivative_order=(0,1))
+            if sps.issparse(evaluation_matrix_u):
+                evaluation_matrix_u = evaluation_matrix_u.toarray()
+                evaluation_matrix_v = evaluation_matrix_v.toarray()
+
+            evaluation_matrix_u_csdl = csdl_map.register_module_input('evaluation_matrix_u_'+key, val=evaluation_matrix_u, shape = evaluation_matrix_u.shape, computed_upstream=False)
+            evaluation_matrix_v_csdl = csdl_map.register_module_input('evaluation_matrix_v_'+key, val=evaluation_matrix_v, shape = evaluation_matrix_v.shape, computed_upstream=False)
+
+            associated_u_function_values = csdl.matmat(evaluation_matrix_u_csdl, coefficients_csdl[key])
+            associated_v_function_values = csdl.matmat(evaluation_matrix_v_csdl, coefficients_csdl[key])
+
+            normals = csdl.cross(associated_u_function_values, associated_v_function_values, axis=1)
+            normals = normals / csdl.expand(csdl.pnorm(normals, axis=1), normals.shape, 'i->ij')
+
+            for i in range(len(value[0])):
+                points[value[0][i],:] = normals[i,:]
+
+        return csdl_map
+    
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self):
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        if self.input_name is not None:
+            self.name = f'{self.function.name}_normal_evaluation_' + self.input_name
+        else:
+            self.name = f'{self.function.name}_normal_evaluation'
+
+        # Define operation arguments
+        surface_names = []
+        for item in self.indexed_mesh:
+            name = item[0]
+            if not name in surface_names:
+                surface_names.append(name)
+        self.arguments = {}
+        coefficients = self.function.coefficients
+        for name in surface_names:
+            self.arguments[coefficients[name].name] = coefficients[name]
+        # self.arguments = self.function.coefficients
+
+        # Create the M3L variables that are being output
+        output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
+
+        output_name = f'evaluated_normal_{self.function.name}'
+        if not self.input_name is None:
+            output_name = output_name + '_' + self.input_name
+
+        function_values = Variable(name=output_name, shape=output_shape, operation=self)
+        return function_values
 
 class IndexedFunctionInverseEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
@@ -1065,6 +1198,13 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 pass
                 # print(f'Variable {variable.name} is not part of an operation')
 
+    def gather_operations_implicit(self, variable:Variable):
+        if variable.operation is not None:
+            operation = variable.operation
+            if operation.name not in self.operations:
+                self.operations[operation.name] = operation
+                for input_name, input in operation.arguments.items():
+                    self.gather_operations_implicit(input)
 
     # def assemble(self):
     #     # Assemble output states
@@ -1104,7 +1244,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         model_csdl = csdl.Model()
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
                 if issubclass(type(operation_csdl), csdl.Model):
@@ -1195,7 +1334,53 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         return self.csdl_model
 
-    
+    # parameters - list[(name, dynamic?, value(s))]
+    def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations_implicit(output)
+        # ODESystemModel = ModuleCSDL()
+        # ODESystemModel.parameters.declare('num_nodes')
+        # n = ODESystemModel.parameters['num_nodes']
+        n = num_times
+        residual_names = []
+        residual_states = []
+        # not collecting parameter names for now, could change this at some point
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ImplicitOperation):
+                residual_names.append(operation.residual_name)
+                residual_states.append(operation.residual_state)
+
+        ode_prob = ODEProblem(integrator, 'time-marching', num_times)
+
+        if parameters is not None:
+            for parameter in parameters:
+                if parameter[1]:
+                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=num_times)
+                else:
+                    ode_prob.add_parameter(parameter[0])
+        for i in range(len(residual_states)):
+            ode_prob.add_state(residual_states[i], 
+                                residual_names[i], 
+                                initial_condition_name=residual_states[i]+'_0', 
+                                output=residual_states[i]+'_integrated')
+        ode_prob.add_times(step_vector='h')
+        ode_prob.set_ode_system(AssembledODEModel)
+                
+        RunModel = csdl.Model()
+
+        for ic in initial_conditions:
+            RunModel.create_input(ic[0], ic[1])
+        if parameters is not None:
+            for parameter in parameters:
+                RunModel.create_input(parameter[0], parameter[2])
+        h_vec = np.ones(num_times-1)*h_stepsize
+        RunModel.create_input('h', h_vec)
+        RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+
+        return RunModel
+
     def assemble_modal(self) -> ModuleCSDL:
             # Assemble output states'output_jacobian_name'
         # Assemble output states
@@ -1242,6 +1427,189 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
         self.modal_csdl_model = model_csdl
         return self.modal_csdl_model
+
+class DynamicModel(Model):
+    def set_dynamic_options(self, 
+                            initial_conditions:list, 
+                            num_times:int, 
+                            h_stepsize:float,
+                            int_naming:tuple = ('','_integrated'),
+                            parameters:list=None, 
+                            integrator:str='RK4',
+                            approach:str='time-marching checkpointing',
+                            profile_outputs:list=None, 
+                            profile_system=None, 
+                            profile_parameters:dict=None,
+                            copycat_profile:bool=False,
+                            post_processor=None,
+                            pp_vars:list=None):
+        self.initial_conditions = initial_conditions
+        self.num_times = num_times
+        self.h_stepsize = h_stepsize
+        self.ODE_parameters = parameters
+        self.integrator = integrator
+        self.profile_outputs = profile_outputs
+        self.profile_system = profile_system
+        self.profile_parameters = profile_parameters
+        self.copycat_profile = copycat_profile
+        self.approach = approach
+        self.post_processor = post_processor
+        self.pp_vars = pp_vars
+        self.int_naming = int_naming
+    def assemble(self, return_operation:bool=False):
+        initial_conditions = self.initial_conditions
+        num_times = self.num_times
+        h_stepsize = self.h_stepsize
+        parameters = self.ODE_parameters
+        integrator = self.integrator
+        int_naming = self.int_naming
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations_implicit(output)
+        residual_names = []
+        # not collecting parameter names for now, could change this at some point
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ImplicitOperation):
+                residual_names += operation.residual_names
+
+        ode_prob = ODEProblem(integrator, self.approach, num_times)
+
+        if parameters is not None:  # do a register output and addemble model for each parameter that's a m3l var
+            for parameter in parameters:
+                if parameter[1]:
+                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=parameter[2].shape)
+                else:
+                    ode_prob.add_parameter(parameter[0])
+        for i in range(len(residual_names)):
+            ode_prob.add_state(residual_names[i][0], 
+                                residual_names[i][1],
+                                shape = residual_names[i][2],
+                                initial_condition_name=residual_names[i][0]+'_0', 
+                                output=int_naming[0] + residual_names[i][0] + int_naming[1])
+                                # output=residual_names[i][0]+'_integrated')
+        ode_prob.add_times(step_vector='h')
+        ode_prob.set_ode_system(AssembledODEModel)
+        # profile outputs
+        if self.copycat_profile:
+            self.profile_system = AssembledODEModel
+            self.profile_parameters = {'operations':self.operations}
+        if self.profile_outputs is not None:
+            for profile_output in self.profile_outputs:
+                ode_prob.add_profile_output(profile_output[0], shape=profile_output[1])
+            ode_prob.set_profile_system(self.profile_system)
+        
+                
+        RunModel = csdl.Model()
+
+        for ic in initial_conditions:
+            RunModel.create_input(ic[0], ic[1])
+        if parameters is not None:
+            parameter_model = Model()
+            add_flag = False
+            for parameter in parameters:
+                if type(parameter[2]) is Variable:
+                    add_flag = True
+                    parameter_model.register_output(parameter[2])
+            parameter_model_csdl = parameter_model.assemble()
+            if add_flag:
+                RunModel.add(parameter_model_csdl, name='input_model')
+            for parameter in parameters:
+                if not type(parameter[2]) is Variable:
+                    RunModel.create_input(parameter[0], parameter[2])
+                else:
+                    RunModel.create_input(parameter[0], shape=parameter[2].shape)
+                    in_name = 'input_model.' + parameter[2].operation.name + '.' + parameter[2].name
+                    RunModel.connect(in_name, parameter[0])
+        h_vec = np.ones(num_times-1)*h_stepsize
+        RunModel.create_input('h', h_vec)
+        if self.profile_parameters is not None:
+            RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}, profile_parameters=self.profile_parameters), 'prob')
+        else:
+            RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+
+        if self.post_processor is not None:
+            RunModel.add(self.post_processor, name='post_processor')
+
+        self.csdl_model=RunModel
+        if return_operation:
+            operation = DynamicOperation()
+            operation.set_model(RunModel)
+            outputs = []
+            if self.pp_vars is not None:
+                for val in self.pp_vars:
+                    outputs.append(Variable(val[0], val[1], operation=operation))
+            if self.profile_outputs is not None:
+                for val in self.profile_outputs:
+                    outputs.append(Variable(val[0], val[1], operation=operation))
+            for val in residual_names:
+                # outputs.append(Variable(val[0] + '_integrated', val[2], operation=operation))
+                outputs.append(Variable('op_' + val[0], val[2], operation=operation))
+
+            operation.set_outputs(outputs)
+            return operation
+        else:
+            return RunModel
+
+class DynamicOperation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('name', default='operation')
+        self.name = self.parameters['name']
+    def set_model(self, model):
+        self.csdl_model = model
+    def set_outputs(self, outputs):
+        self.outputs = outputs
+    def evaluate(self):
+        self.arguments = {}
+        return tuple(self.outputs)
+    def compute(self):
+        return self.csdl_model
+
+
+class AssembledODEModel(ModuleCSDL):
+    def initialize(self):
+        self.parameters.declare('num_nodes')
+        self.parameters.declare('operations')
+    def define(self):
+        num_nodes = self.parameters['num_nodes']
+        operations = self.parameters['operations']
+
+        for operation_name, operation in operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute(num_nodes=num_nodes)
+
+                if type(operation_csdl) is csdl.Model:
+                    self.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                operation_csdl = operation.compute_residual(num_nodes=num_nodes)
+                # promote these for connections in ozone - may need to make residual stuff a list
+                promotions = operation.ode_parameters
+                for i in range(len(operation.residual_names)):
+                    promotions += [operation.residual_names[i][0], operation.residual_names[i][1]]
+                # if issubclass(type(operation_csdl), csdl.Model):
+                #     self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
+                # elif issubclass(type(operation_csdl), ModuleCSDL):
+                #     self.add_module(submodule=operation_csdl, name=operation_name, promotes=promotions)
+                if issubclass(type(operation_csdl), csdl.Model):
+                    self.add(submodel=operation_csdl, name=operation_name)
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    self.add_module(submodule=operation_csdl, name=operation_name)
+                else:
+                    raise Exception(f"{operation.name}'s compute_residual() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
 
 # This is a bit of a hack to get a caddee static model to do a modal assemble
 class StructuralModalModel(Model):
