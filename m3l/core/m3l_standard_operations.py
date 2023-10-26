@@ -76,47 +76,157 @@ class Norm(ExplicitOperation):
         norm_derivative_model.register_output(f'{x_arg.name}_norm_derivative', dx_norm_dx)
 
 
-
-
-class Subtract(ExplicitOperation):
+class Power(ExplicitOperation):
     def initialize(self, kwargs):
-        self.parameters.declare('some_input', types=int, default=0)
+        self.parameters.declare('name', default='subtraction_operation', types=str)
 
     def assign_attributes(self):
-        self.some_parameter = self.parameters['some_input']
+        self.name = self.parameters['name']
 
     def compute(self):
-        x1 = self.arguments['x1']
-        x2 = self.arguments['x2']
+        scalers = self.scalers
+        arguments = self.arguments
 
+        x1 = arguments['x1']
+        x2 = scalers['x2']
         csdl_model = csdl.Model()
-        x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
-        x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable('x1', shape=x1.shape)
+        y = x1_csdl**x2
 
-        y = x1_csdl - x2_csdl
-        output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
-        csdl_model.register_output(name=self.output_name, var=y)
-        csdl_model.print_var(y)
+        # output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_scaler')
+        csdl_model.register_output(self.output_name, y)
+
         return csdl_model
 
     def evaluate(self, x1 : Variable, x2 : Variable):
         random_name = generate_random_string()
-        self.name = f'{x1.name}_minus_{x2.name}_operation_{random_name}'
-        self.arguments = {}
-        self.arguments['x1'] = x1
-        self.arguments['x2'] = x2
+        self.name = f'{x1.name}_to_the_power_operation_{random_name}'
 
-        output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
-        output = Variable(shape=x1.shape, operation=self)
-        self.output_name = output.name
+        if not isinstance(x1, Variable):
+            raise ValueError(f"Base of exponenent operation has to be an m3l.Variable. Received type {type(x1)}")
+        elif isinstance(x2, Variable):
+            raise ValueError(f"Cannot raise an m3l variable to the power of another m3l variable yet")
+        
+        else:
+            self.scalers = {}
+            self.arguments = {}
+            self.scalers['x2'] = x2
+            self.arguments['x1'] = x1
+            
+            # output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_scaler')
+            output = Variable(name=output_name, shape=x1.shape, operation=self)
+            self.output_name = output.name
 
-        # create csdl model for in-line evaluations
-        operation_csdl = self.compute()
-        sim = Simulator(operation_csdl)
-        sim['x1'] = x1.value
-        sim['x2'] = x2.value
-        sim.run()
-        output.value = sim[self.output_name]
+            return output
+
+class Subtract(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('name', default='subtraction_operation', types=str)
+
+    def assign_attributes(self):
+        self.name = self.parameters['name']
+
+    def compute(self):
+        scalers = self.scalers
+        arguments = self.arguments
+
+        if 'x1' in scalers:
+            x1 = scalers['x1']
+            x2 = arguments['x2']
+            csdl_model = csdl.Model()
+            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+            y = x1 - x2_csdl
+
+            # output_name = replace_periods_with_underscores(f'scaler_minus_{x2.name}')
+            csdl_model.register_output(name=self.output_name, var=y)
+
+        elif 'x2' in scalers:
+            x1 = arguments['x1']
+            x2 = scalers['x2']
+            csdl_model = csdl.Model()
+            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
+            y = x1_csdl - x2
+
+            # output_name = replace_periods_with_underscores(f'{x1.name}_minus_scaler')
+            csdl_model.register_output(name=self.output_name, var=y)
+        else:
+            x1 = self.arguments['x1']
+            x2 = self.arguments['x2']
+
+            csdl_model = csdl.Model()
+            x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
+            x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
+
+            y = x1_csdl - x2_csdl
+            # output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
+            csdl_model.register_output(name=self.output_name, var=y)
+        
+        # csdl_model.print_var(y)
+        
+        return csdl_model
+
+    def evaluate(self, x1 : Variable, x2 : Variable):
+        random_name = generate_random_string()
+        if isinstance(x1, (float, int)):
+            self.name = f'scaler_minus_{x2.name}_operation_{random_name}'
+            self.arguments = {}
+            self.scalers = {}
+            self.scalers['x1'] = x1
+            self.arguments['x2'] = x2
+
+            # output_name = replace_periods_with_underscores(f'scaler_minus_{x2.name}')
+            output = Variable(name=output_name, shape=x2.shape, operation=self)
+            self.output_name = output.name
+            
+            # NOTE: in-line evaluations only work if all solver developers implement them
+            # create csdl model for in-line evaluations
+            # operation_csdl = self.compute()
+            # sim = Simulator(operation_csdl)
+            # sim['x2'] = x2.value
+            # sim.run()
+            # output.value = sim[output_name]
+
+        elif isinstance(x2, (float, int)):
+            self.name = f'{x1.name}_minus_scaler_operation_{random_name}'
+            self.arguments = {}
+            self.scalers = {}
+            self.scalers['x2'] = x2
+            self.arguments['x1'] = x1
+
+            output_name = replace_periods_with_underscores(f'{x1.name}_minus_scaler')
+            output = Variable(name=output_name, shape=x1.shape, operation=self)
+            self.output_name = output.name
+
+            # create csdl model for in-line evaluations
+            # operation_csdl = self.compute()
+            # sim = Simulator(operation_csdl)
+            # print(sim['x1'].shape)
+            # print(x1.shape)
+            # print(x1.value)
+            # print(x1.name)
+            # sim['x1'] = x1.value
+            # sim.run()
+            # output.value = sim[output_name]
+        
+        else:
+            self.name = f'{x1.name}_minus_{x2.name}_operation_{random_name}'
+            self.arguments = {}
+            self.scalers = {}
+            self.arguments['x1'] = x1
+            self.arguments['x2'] = x2
+
+            output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
+            output = Variable(name=output_name, shape=x1.shape, operation=self)
+            self.output_name = output.name
+            
+            # create csdl model for in-line evaluations
+            operation_csdl = self.compute()
+            sim = Simulator(operation_csdl)
+            sim['x1'] = x1.value
+            sim['x2'] = x2.value
+            sim.run()
+            output.value = sim[output_name]
+
         
         return output
 
@@ -264,7 +374,16 @@ class Division(ExplicitOperation):
         x1_csdl = csdl_model.declare_variable(name='x1', shape=x1.shape)
         x2_csdl = csdl_model.declare_variable(name='x2', shape=x2.shape)
 
+        if x1.shape != x2.shape:
+            if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
+                x2_csdl = csdl.expand(x2_csdl, shape=x1.shape)
+            elif (x2.shape != (1, ) or x2.shape != (1, 1)) and (x1.shape == (1, ) or x1.shape == (1, 1)):
+                x1_csdl = csdl.expand(x1_csdl, shape=x2.shape)
+            else:
+                raise ValueError(f"Cannot resolve shapes of division for variable shapes {x1.shape} and {x2.shape}")
+        
         y = x1_csdl / x2_csdl
+        
         output_name = replace_periods_with_underscores( f'{x1.name}_divide_by_{x2.name}')
         csdl_model.register_output(name=self.output_name, var=y)
         return csdl_model

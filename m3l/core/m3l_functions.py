@@ -1,6 +1,7 @@
 import csdl
 from m3l.core.m3l_classes import Variable
 from m3l.core.m3l_standard_operations import *
+from typing import Union
 
 def copy(x : Variable):
     """
@@ -67,8 +68,16 @@ def cross(x1 : Variable, x2 : Variable, axis : int=0):
 
     return cross_product_operation.evaluate(x1=x1, x2=x2)
 
+def power(x1 : Union[Variable, int, float], x2: Union[Variable, float, int]):
+    """
+    Performs power operation between m3l variable or an m3l variable and float/int
+    """
+    power_operation = Power()
 
-def multiply(x1 : Variable, x2 : Variable):
+    return power_operation.evaluate(x1=x1, x2=x2)
+
+
+def multiply(x1 : Union[Variable, int, float], x2 : Variable):
     """
     Performs multiplication of two m3l variables, i.e., x1 * x2
     """
