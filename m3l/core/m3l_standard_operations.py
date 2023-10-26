@@ -114,7 +114,7 @@ class Power(ExplicitOperation):
             self.arguments['x1'] = x1
             
             # output_name = replace_periods_with_underscores(f'{x1.name}_to_the_power_scaler')
-            output = Variable(name=output_name, shape=x1.shape, operation=self)
+            output = Variable(shape=x1.shape, operation=self)
             self.output_name = output.name
 
             return output
@@ -218,7 +218,7 @@ class Subtract(ExplicitOperation):
             output_name = replace_periods_with_underscores(f'{x1.name}_minus_{x2.name}')
             output = Variable(name=output_name, shape=x1.shape, operation=self)
             self.output_name = output.name
-            
+
             # create csdl model for in-line evaluations
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
