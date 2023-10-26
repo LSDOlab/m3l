@@ -101,6 +101,21 @@ def divide(x1 : Variable, x2 : Variable):
 
     return division_operation.evaluate(x1=var1, x2=var2)
 
+def sum(x:Variable, axes:tuple):
+    """
+    Performs summation of an m3l variable along specified axes.
+
+    Parameters:
+    ----------
+    x : Variable
+        The m3l variable on which the summation is to be performed
+    axes :  tuple
+        The axes along which the summation is to be performed 
+    """
+    sum_operation = Sum(axes=axes)
+
+    return sum_operation.evaluate(x)
+
 def vstack(x1 : Variable, x2: Variable):
     """
     Performs vertical stacking of two m3l variables

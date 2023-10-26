@@ -188,9 +188,9 @@ class ImplicitOperation(Operation):
         pass
 
 
-
 @dataclass
 class Variable:
+    variable_counter = 0
     '''
     An M3L variable. This represents information in the model.
 
@@ -205,8 +205,8 @@ class Variable:
     value : np.ndarray = None
         The value of the variable.
     '''
-    name : str
     shape : tuple
+    name : str = None
     operation : Operation = None
     value : np.ndarray = None
     dv_flag : bool = False
@@ -215,6 +215,10 @@ class Variable:
     scaler : Union[int, float, None] = None
     equals : Union[int, float, np.ndarray, None] = None
 
+    def __post_init__(self):
+        if self.name is None:
+            self.name = f'{Variable.variable_counter}'
+        Variable.variable_counter += 1
 
     def __getitem__(self, indices):
         import m3l
