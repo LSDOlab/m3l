@@ -1114,7 +1114,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
 
-                if type(operation_csdl) is csdl.Model:
+                if issubclass(type(operation_csdl), csdl.Model):
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 elif issubclass(type(operation_csdl), ModuleCSDL):
                     model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
@@ -1288,7 +1288,7 @@ class DynamicModel(Model):
                                 output=int_naming[0] + residual_names[i][0] + int_naming[1])
                                 # output=residual_names[i][0]+'_integrated')
         ode_prob.add_times(step_vector='h')
-        ode_prob.set_ode_system(AssembledODEModel)
+        ode_prob.set_ode_system(AssembledODEModel, analytics=True, display_scripts=True)
         # profile outputs
         if self.copycat_profile:
             self.profile_system = AssembledODEModel
