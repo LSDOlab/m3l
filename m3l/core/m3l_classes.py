@@ -4,7 +4,7 @@ from typing import Any, List
 import numpy as np
 import scipy.sparse as sps
 from scipy import linalg
-import array_mapper as am
+# import array_mapper as am
 # import scipy.sparse as sps
 import csdl
 from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
@@ -327,16 +327,16 @@ class Function:
     space : FunctionSpace
     coefficients : Variable
 
-    def __call__(self, mesh : am.MappedArray) -> Variable:
+    def __call__(self, mesh : Variable) -> Variable:
         return self.evaluate(mesh)
 
-    def evaluate(self, mesh : am.MappedArray) -> Variable:
+    def evaluate(self, mesh : Variable) -> Variable:
         '''
         Evaluate the function at a given set of nodal locations.
 
         Parameters
         ----------
-        mesh : am.MappedArray
+        mesh : Variable
             The mesh to evaluate over.
 
         Returns
@@ -405,7 +405,7 @@ class Function:
 class FunctionEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
         self.parameters.declare('function', types=Function)
-        self.parameters.declare('mesh', types=am.MappedArray)
+        self.parameters.declare('mesh', types=Variable)
 
     def assign_attributes(self):
         '''
@@ -498,7 +498,7 @@ class IndexedFunction:
     space : IndexedFunctionSpace
     coefficients : dict[str, Variable] = None
 
-    def __call__(self, mesh : am.MappedArray) -> Variable:
+    def __call__(self, mesh : Variable) -> Variable:
         return self.evaluate(mesh)
 
     def evaluate(self, indexed_parametric_coordinates) -> Variable:
@@ -507,7 +507,7 @@ class IndexedFunction:
 
         Parameters
         ----------
-        mesh : am.MappedArray
+        mesh : Variable
             The mesh to evaluate over.
 
         Returns
