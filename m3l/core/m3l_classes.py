@@ -1123,7 +1123,15 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
                 for input_name, input in operation.arguments.items():
                     if input.operation is not None:
-                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                        if input.operation == model_csdl:
+                            model_csdl.connect(input.name, operation_name+"."+input_name) # when not promoting
+                        else:
+                            model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+                    else:
+                        input.operation = model_csdl
+                        input.name = input.name + '_input'
+                        model_csdl.create_input(input.name, val=input.value, shape=input.shape)
+                        model_csdl.connect(input.name, operation_name+"."+input_name)
 
 
         self.csdl_model = model_csdl
