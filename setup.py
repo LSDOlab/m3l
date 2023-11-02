@@ -33,9 +33,6 @@ setup(
         'setuptools',
         'wheel',
         'twine',
-        'csdl @ git+https://github.com/LSDOlab/csdl.git',
-        'lsdo_modules @ git+https://github.com/LSDOlab/lsdo_modules.git',
-        'array_mapper @ git+https://github.com/LSDOlab/array_mapper.git',
     ],
     classifiers=[
         'Programming Language :: Python',
