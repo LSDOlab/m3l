@@ -25,6 +25,7 @@ setup(
         'sphinx_rtd_theme',
         'sphinx-copybutton',
         'sphinx-autoapi',
+        'ozone @ git+https://github.com/LSDOlab/ozone.git',
         'numpydoc',
         # 'python-poetry',
         'gitpython', 

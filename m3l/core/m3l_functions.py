@@ -94,7 +94,7 @@ def divide(x1 : Variable, x2 : Variable):
     else:
         var1 = x1
     if type(x2) is int or type(x2) is float:
-        var2 = Variable('x2', shape=(1, ), value=x2)
+        var2 = Variable(name='x2', shape=(1, ), value=x2)
     else:
         var2 = x2
     division_operation = Division()
