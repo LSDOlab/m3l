@@ -43,6 +43,75 @@ def reshape(x : Variable, shape : tuple):
 
     return reshape_operation.evaluate(x)
 
+def expand(x : Variable, new_shape, indices : str = None):
+    """
+    Performs expansion of an m3l variable
+    ----------
+    x : Variable
+        The m3l variable to be expanded
+    new_shape : tuple
+        The shape to which the m3l variable is to be expanded to
+    """
+
+    expand_operation = Expand(new_shape=new_shape, indices=indices)
+
+    return expand_operation.evaluate(x)
+
+def dot(x1 : Variable, x2: Variable, axis : int = None):
+    """
+    Performs dot product of 2 m3l variables
+    ----------
+    x1 : Variable
+        the first m3l variable
+    x2 : Variable
+        the second m3l variable
+    axis : int
+        The axis across which to perform the dot product
+    """
+
+    dot_operation = Dot()
+
+    return dot_operation.evaluate(x1=x1, x2=x2, axis=axis)
+
+def cos(x : Variable):
+    """
+    Performs cosine operation of an m3l variable
+    """
+
+    cos_operation = Cos()
+
+    return cos_operation.evaluate(x=x)
+
+
+def sin(x : Variable):
+    """
+    Performs sine operation of an m3l variable
+    """
+
+    sin_operation = Sin()
+
+    return sin_operation.evaluate(x=x)
+
+def arccos(x : Variable):
+    """
+    Performs inverse cosine operation of an m3l variable
+    """
+
+    arccos_operation = ArcCos()
+
+    return arccos_operation.evaluate(x=x)
+
+
+def arcsin(x : Variable):
+    """
+    Performs inverse sine operation of an m3l variable
+    """
+
+    arcsin_operation = ArcSin()
+
+    return arcsin_operation.evaluate(x=x)
+
+
 def norm(x : Variable, order:int=2, axes:tuple=(-1, )):
     """
     Performs p-norm of an m3l variable along specified axes.
