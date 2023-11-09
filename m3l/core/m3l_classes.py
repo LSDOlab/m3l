@@ -402,7 +402,7 @@ class Function:
     '''
     name : str
     space : FunctionSpace
-    coefficients : Variable = None
+    coefficients : Variable
 
     def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
@@ -573,7 +573,7 @@ class IndexedFunction:
     '''
     name : str
     space : IndexedFunctionSpace
-    coefficients : dict[str, Variable] = None
+    coefficients : dict[str, Variable]
 
     def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
@@ -595,6 +595,70 @@ class IndexedFunction:
         function_evaluation_model = IndexedFunctionEvaluation(function=self, indexed_parametric_coordinates=indexed_parametric_coordinates)
         function_values = function_evaluation_model.evaluate()
         return function_values
+
+    def evaluate_conservative(self, 
+                              fitting_matrix_key_list, 
+                              num_oml_output_points=None,
+                              num_oml_dual_variable_points=None,
+                              composition_mat=None,
+                              otherside_composed_mat=None, 
+                              solver_invariant_mat=None, 
+                              framework_invariant_mat=None) -> Variable:
+        '''
+        Construct evaluation map such that it conserves aeroelastic work.
+
+        Parameters
+        ----------
+        mesh : am.MappedArray
+            The mesh to evaluate over.
+
+        Returns
+        -------
+        function_values : FunctionValues
+            A variable representing the evaluated function values.
+        '''
+        # TODO: Compute projection matrix based on invariant matrices and other projection matrices, then distribute the
+        # Compute projection matrix
+        
+        # incoming_projection_T_times_solver_mat = composition_mat.T@solver_invariant_mat
+        # pinv_incoming_projection_T_times_solver_mat = np.linalg.pinv(incoming_projection_T_times_solver_mat.toarray())
+        # framework_mat_times_otherside_composition = framework_invariant_mat@otherside_composed_mat
+
+        # # inv_term = incoming_projection_T_times_solver_mat@pinv_incoming_projection_T_times_solver_mat
+
+        # # TODO: Matrix below could be made more sparse, by switching the inverse-distance weighting to a function with a compact support
+        # # construct the projection matrix itself
+        # proj_mat_T = framework_mat_times_otherside_composition@pinv_incoming_projection_T_times_solver_mat
+        # proj_mat = proj_mat_T.T
+
+        # # now that we have the projection matrix we construct a vector of the inputs by looping over the provided keys
+        # coefficient_obj_list = []
+        # for key in fitting_matrix_key_list:
+        #     coefficient_obj = self.coefficients[key]
+        #     surf_coefficient_arr = coefficient_obj.value.reshape((-1, coefficient_obj.shape[-1]))
+
+        #     coefficient_obj_list += [surf_coefficient_arr]
+
+        # # make vertical stack of coefficient objects
+        # coefficients_stacked = np.vstack(coefficient_obj_list)
+        # # stack the [x, y, z] components of the coefficients
+        # coefficients_vec_flat = coefficients_stacked.flatten(order='F')
+
+        # # multiply projection matrix with flat coefficient matrix
+        # output_vec = proj_mat@coefficients_vec_flat
+
+        # TODO: Add input argument that encodes the order of the surfaces, so we can match the right projection columns to the right surface coefficients
+
+        conservative_function_evaluation_model = IndexedFunctionConservativeEvaluation(function=self, 
+                                                                                       vector_surface_order=fitting_matrix_key_list,
+                                                                                       solver_invariant_mat=solver_invariant_mat,
+                                                                                       framework_invariant_mat=framework_invariant_mat,
+                                                                                       num_oml_output_points=num_oml_output_points,
+                                                                                       num_oml_dual_variable_points=num_oml_dual_variable_points
+                                                                                       )
+        function_values = conservative_function_evaluation_model.evaluate()
+        return function_values
+    
     def inverse_evaluate(self, indexed_parametric_coordinates, function_values:Variable, regularization_coeff:float=None):
         '''
         Performs an inverse evaluation to set the coefficients of this function given an input of evaluated points over a mesh.
@@ -636,6 +700,192 @@ class IndexedFunction:
             evaluation_matrix = self.space.spaces[key].compute_evaluation_map(value[1])
             evaluated_points[value[0],:] = evaluation_matrix.dot(coefficients[key].reshape((-1, coefficients[key].shape[-1])))
         return evaluated_points
+
+
+class IndexedFunctionConservativeEvaluation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('function', types=IndexedFunction)
+        self.parameters.declare('vector_surface_order', types=list)
+        self.parameters.declare('solver_invariant_mat', types=sps.coo_matrix)
+        self.parameters.declare('framework_invariant_mat', types=sps.coo_matrix)
+        self.parameters.declare('num_oml_output_points', types=int)
+        self.parameters.declare('num_oml_dual_variable_points', types=int)
+
+    def assign_attributes(self):
+        '''
+        Assigns class attributes to make class more like standard python class.
+        '''
+        self.function = self.parameters['function']
+        self.vector_surface_order = self.parameters['vector_surface_order']
+        self.solver_invariant_mat = self.parameters['solver_invariant_mat']
+        self.framework_invariant_mat = self.parameters['framework_invariant_mat']
+        self.num_oml_output_points = self.parameters['num_oml_output_points']
+        self.num_oml_dual_variable_points = self.parameters['num_oml_dual_variable_points']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+
+        # associated_coords = {}
+        # index = 0
+        # for item in self.indexed_mesh:
+        #     key = item[0]
+        #     value = item[1]
+        #     if key not in associated_coords.keys():
+        #         associated_coords[key] = [[index], value]
+        #     else:
+        #         associated_coords[key][0].append(index)
+        #         associated_coords[key] = [associated_coords[key][0], np.vstack((associated_coords[key][1], value))]
+        #     index += 1
+
+        # output_name = f'evaluated_{self.function.name}'
+        # output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
+        csdl_map = ModuleCSDL()
+
+        # register the solver and framework invariant matrices
+        solver_invariant_mat = csdl_map.register_module_input(name='solver_invariant_mat', 
+                                                           val=self.solver_invariant_mat_stacked.toarray())
+        framework_invariant_mat = csdl_map.register_module_input(name='framework_invariant_mat', 
+                                                           val=self.framework_invariant_mat_stacked.toarray())        
+
+        # import oml -> solver map (that is applied directly after the current map)
+        oml_to_solver_map = csdl_map.register_module_input(name='wing_displacement_input_function_displacements_map', 
+                                                           shape=(self.solver_invariant_mat.shape[0], self.num_oml_output_points))
+
+        # import solver -> oml map on the other side of the aeroelastic coupling diagram
+        solver_to_oml_map = csdl_map.register_module_input(name='wing_force_map', shape=(self.num_oml_dual_variable_points, self.solver_invariant_mat.shape[1]))
+
+        # import oml -> framework map on the other side of the aeroelastic coupling diagram
+        oml_to_framework_map_list = []
+        total_oml_to_framework_map_rows = 0
+        for surf_name in self.vector_surface_order:
+            total_oml_to_framework_map_rows += np.prod(self.function.coefficients[surf_name].shape[:-1])
+            oml_to_framework_map = csdl_map.register_module_input(name='fitting_matrix_{}'.format(surf_name), shape=(np.prod(self.function.coefficients[surf_name].shape[:-1]), self.num_oml_dual_variable_points))
+            oml_to_framework_map_list += [oml_to_framework_map]
+
+        # we combine all `oml_to_framework_map` instances into a single big array
+        oml_to_framework_maps_all_surfaces = csdl_map.create_output(name='oml_to_framework_maps_all_surfaces', shape=(total_oml_to_framework_map_rows, self.num_oml_dual_variable_points))
+        current_insert_start = 0
+        current_insert_end = 0  # oml_to_framework_map_list[0].shape[0]
+        for oml_to_framework_object in oml_to_framework_map_list:
+            current_insert_end += oml_to_framework_object.shape[0]
+            oml_to_framework_maps_all_surfaces[current_insert_start:current_insert_end, :] = oml_to_framework_object
+            current_insert_start += oml_to_framework_object.shape[0]
+
+        # Now that we have all three of the component-specific maps we stack each one three times along the diagonal of larger matrices,
+        # so that later on we can directly matvec multiply the [x; y; z] input vector to obtain the corresponding output
+        
+        # First we define the stacked csdl objects
+        oml_to_solver_map_stacked = csdl_map.create_output(name='oml_to_solver_map_stacked', shape=(3*self.solver_invariant_mat.shape[0], 3*self.num_oml_output_points))
+        solver_to_oml_map_stacked = csdl_map.create_output(name='solver_to_oml_map_stacked', shape=(3*self.num_oml_dual_variable_points, 3*self.solver_invariant_mat.shape[1]))
+        oml_to_framework_maps_all_surfaces_stacked = csdl_map.create_output(name='oml_to_framework_maps_all_surfaces_stacked', shape=(3*total_oml_to_framework_map_rows, 3*self.num_oml_dual_variable_points))
+
+        # oml_to_solver_map_mult = 1*oml_to_solver_map
+        # solver_to_oml_map_mult = 1*solver_to_oml_map
+        # oml_to_framework_maps_all_surfaces_mult = 1*oml_to_framework_maps_all_surfaces
+
+        # loop over all three principal directions (x, y, z) and fill the corresponding diagonal blocks each time
+        for i in range(3):
+            oml_to_solver_map_stacked[i*self.solver_invariant_mat.shape[0]:(i+1)*self.solver_invariant_mat.shape[0], i*self.num_oml_output_points:(i+1)*self.num_oml_output_points] = 1*oml_to_solver_map
+            solver_to_oml_map_stacked[i*self.num_oml_dual_variable_points:(i+1)*self.num_oml_dual_variable_points, i*self.solver_invariant_mat.shape[1]:(i+1)*self.solver_invariant_mat.shape[1]] = 1*solver_to_oml_map
+            oml_to_framework_maps_all_surfaces_stacked[i*total_oml_to_framework_map_rows:(i+1)*total_oml_to_framework_map_rows, i*self.num_oml_dual_variable_points:(i+1)*self.num_oml_dual_variable_points] = 1*oml_to_framework_maps_all_surfaces
+            # oml_to_solver_map_mult = 1*oml_to_solver_map_mult
+
+        # Now we have all three stacked maps and the stacked invariant matrices are stored in `self`, so we can compute the work-conserving projection map
+        otherside_composition_map = csdl.matmat(oml_to_framework_maps_all_surfaces_stacked, solver_to_oml_map_stacked)
+        framework_mat_times_otherside_composition = csdl.matmat(framework_invariant_mat, otherside_composition_map)
+
+        # we hack our way to computing the pseudo-inverse of the product of two matrices 
+        oml_to_solver_map_transpose = csdl.transpose(oml_to_solver_map_stacked)
+        oml_to_solver_map_T_times_solver_mat = csdl.matmat(oml_to_solver_map_transpose, solver_invariant_mat)
+        # we compute the pseudo-inverse with Numpy and then convert it to a CSDL object
+        pinv_oml_to_solver_map_T_times_solver_mat = np.linalg.pinv(oml_to_solver_map_T_times_solver_mat.val)
+        pinv_oml_to_solver_map_T_times_solver_mat_csdl = csdl_map.create_input(name='pinv_oml_to_solver_map_T_times_solver_mat', val=pinv_oml_to_solver_map_T_times_solver_mat)
+
+        # Now we can finally construct the actual projection matrix
+        proj_mat_transpose = csdl.matmat(framework_mat_times_otherside_composition, pinv_oml_to_solver_map_T_times_solver_mat_csdl)
+        proj_mat = csdl.transpose(proj_mat_transpose)
+
+        # multiply the projection matrix with the 
+
+
+
+
+        # coefficients_csdl = {} 
+        # for key, coefficients in self.function.coefficients.items():
+        #     num_coefficients = np.prod(coefficients.shape[:-1])
+        #     if coefficients.value is None:
+        #         coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
+        #     else:
+        #         coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+        #                                                             val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+
+        # for key, value in associated_coords.items():
+        #     evaluation_matrix = self.function.space.spaces[key].compute_evaluation_map(value[1])
+        #     if sps.issparse(evaluation_matrix):
+        #         evaluation_matrix = evaluation_matrix.toarray()
+        #     evaluation_matrix_csdl = csdl_map.register_module_input('evaluation_matrix_'+key, val=evaluation_matrix, shape = evaluation_matrix.shape, computed_upstream=False)
+        #     associated_function_values = csdl.matmat(evaluation_matrix_csdl, coefficients_csdl[key])
+        #     for i in range(len(value[0])):
+        #         points[value[0][i],:] = associated_function_values[i,:]
+
+        return csdl_map
+    
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self):
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        self.name = f'{self.function.name}_evaluation'
+
+        # Define operation arguments
+        # surface_names = []
+        # for item in self.indexed_mesh:
+        #     name = item[0]
+        #     if not name in surface_names:
+        #         surface_names.append(name)
+        self.arguments = {}
+        coefficients = self.function.coefficients
+        for name in self.vector_surface_order:
+            self.arguments[coefficients[name].name] = coefficients[name]
+        self.arguments = self.function.coefficients
+
+        self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
+        self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
+
+        # Create the M3L variables that are being output
+        output_shape = (len(self.vector_surface_order), self.function.coefficients[self.vector_surface_order[0]].shape[-1])
+
+        function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
+        return function_values
 
 
 class IndexedFunctionEvaluation(ExplicitOperation):
@@ -1059,6 +1309,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
 
     def gather_operations(self, variable:Variable):
+        """
+        Adds all operations to the `self.operations` dictionary under their own name.
+        """
         if variable.operation is not None:
             operation = variable.operation
             for input_name, input in operation.arguments.items():
@@ -1172,6 +1425,141 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
         self.modal_csdl_model = model_csdl
         return self.modal_csdl_model
+
+class ImplicitAeroelasticModel(Model):
+    def __init__(self, ) -> None:
+        super().__init__()
+
+        # initialize CADDEE CSDL model in which the fluid and solid are to be linked
+        self.csdl_model = ModuleCSDL()
+
+    def gather_operations_implicit(self, variable:Variable):
+        if variable.operation is not None:
+            operation = variable.operation
+            if operation.name not in self.operations:
+                self.operations[operation.name] = operation
+                for input_name, input in operation.arguments.items():
+                    self.gather_operations_implicit(input)
+
+    def assemble(self):
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations_implicit(output)
+        
+        model_csdl = ModuleCSDL()
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute()
+
+                if type(operation_csdl) is csdl.Model:
+                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+
+        self.csdl_model = model_csdl
+        return self.csdl_model
+
+    def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
+        # Assemble output states
+        for output_name, output in self.outputs.items():
+            self.gather_operations_implicit(output)
+        # ODESystemModel = ModuleCSDL()
+        # ODESystemModel.parameters.declare('num_nodes')
+        # n = ODESystemModel.parameters['num_nodes']
+        n = num_times
+        residual_names = []
+        residual_states = []
+        # not collecting parameter names for now, could change this at some point
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ImplicitOperation):
+                residual_names.append(operation.residual_name)
+                residual_states.append(operation.residual_state)
+
+        from ozone.api import ODEProblem
+
+        ode_prob = ODEProblem(integrator, 'time-marching', num_times)
+
+        if parameters is not None:
+            for parameter in parameters:
+                if parameter[1]:
+                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=num_times)
+                else:
+                    ode_prob.add_parameter(parameter[0])
+        for i in range(len(residual_states)):
+            ode_prob.add_state(residual_states[i], 
+                                residual_names[i], 
+                                initial_condition_name=residual_states[i]+'_0', 
+                                output=residual_states[i]+'_integrated')
+        ode_prob.add_times(step_vector='h')
+        ode_prob.set_ode_system(AssembledODEModel)
+                
+        RunModel = csdl.Model()
+
+        for ic in initial_conditions:
+            RunModel.create_input(ic[0], ic[1])
+        if parameters is not None:
+            for parameter in parameters:
+                RunModel.create_input(parameter[0], parameter[2])
+        h_vec = np.ones(num_times-1)*h_stepsize
+        RunModel.create_input('h', h_vec)
+        RunModel.add(ode_prob.create_solver_model(ODE_parameters={'operations':self.operations}), 'prob')
+
+        return RunModel
+
+class AssembledODEModel(ModuleCSDL):
+    def initialize(self):
+        self.parameters.declare('num_nodes')
+        self.parameters.declare('operations')
+    def define(self):
+        num_nodes = self.parameters['num_nodes']
+        operations = self.parameters['operations']
+
+        for operation_name, operation in operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute(num_nodes=num_nodes)
+
+                if type(operation_csdl) is csdl.Model:
+                    self.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None:
+                        self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
+            if issubclass(type(operation), ImplicitOperation):
+                # TODO: also take input_jacobian
+                operation_csdl = operation.compute_residual(num_nodes=num_nodes)
+                # promote these for connections in ozone - may need to make residual stuff a list
+                promotions = operation.ode_parameters
+                for i in range(len(operation.residual_names)):
+                    promotions += [operation.residual_names[i][0], operation.residual_names[i][1]]
+                # if issubclass(type(operation_csdl), csdl.Model):
+                #     self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
+                # elif issubclass(type(operation_csdl), ModuleCSDL):
+                #     self.add_module(submodule=operation_csdl, name=operation_name, promotes=promotions)
+                if issubclass(type(operation_csdl), csdl.Model):
+                    self.add(submodel=operation_csdl, name=operation_name)
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    self.add_module(submodule=operation_csdl, name=operation_name)
+                else:
+                    raise Exception(f"{operation.name}'s compute_residual() method is returning an invalid model type.")
+
+                for input_name, input in operation.arguments.items():
+                    if input.operation is not None and input is not None:
+                        self.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+
 
 # This is a bit of a hack to get a caddee static model to do a modal assemble
 class StructuralModalModel(Model):
