@@ -1084,6 +1084,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
             else:
                 if output.operation:
+                    print(output.name)
+                    print(output.operation.name)
                     name = f'{output.operation.name}_{output.name}'
                     self.outputs[name] = output
                 else:
