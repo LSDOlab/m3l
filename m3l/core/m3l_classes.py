@@ -656,7 +656,7 @@ class IndexedFunction:
                                                                                        num_oml_output_points=num_oml_output_points,
                                                                                        num_oml_dual_variable_points=num_oml_dual_variable_points
                                                                                        )
-        function_values = conservative_function_evaluation_model.evaluate(num_oml_output_points)
+        function_values = conservative_function_evaluation_model.evaluate(composition_mat, otherside_composed_mat)
         return function_values
     
     def inverse_evaluate(self, indexed_parametric_coordinates, function_values:Variable, regularization_coeff:float=None):
@@ -721,7 +721,7 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         self.framework_invariant_mat = self.parameters['framework_invariant_mat']
         self.num_oml_output_points = self.parameters['num_oml_output_points']
         self.num_oml_dual_variable_points = self.parameters['num_oml_dual_variable_points']
-    
+
     def compute(self):
         '''
         Creates the CSDL model to compute the function evaluation.
@@ -733,71 +733,23 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         '''
         csdl_map = ModuleCSDL()
 
-        # register the solver and framework invariant matrices
-        solver_invariant_mat = csdl_map.register_module_input(name='solver_invariant_mat', 
-                                                           val=self.solver_invariant_mat.toarray())
-        framework_invariant_mat = csdl_map.register_module_input(name='framework_invariant_mat', 
-                                                           val=self.framework_invariant_mat.toarray())        
+        # TODO: Conditioning of `self.composition_mat` below is extremely poor (4.6e17) and breaks down the computations
+        #       This is likely because of the inverse distance weighting approach -- add a fix for this by removing extremely small numbers
+        incoming_projection_T_times_solver_mat = self.composition_mat.T@self.solver_invariant_mat
+        # repeat matrix along diagonal three times and compute pseudo-inverse
+        pinv_incoming_projection_T_times_solver_mat = np.linalg.pinv(sps.block_diag([incoming_projection_T_times_solver_mat]*3).toarray())
+        framework_mat_times_otherside_composition = self.framework_invariant_mat@self.otherside_composed_mat
+        framework_mat_times_otherside_composition_stacked = sps.block_diag([framework_mat_times_otherside_composition]*3)
 
-        # import oml -> solver map (that is applied directly after the current map)
-        oml_to_solver_map = csdl_map.register_module_input(name='wing_displacement_input_function_displacements_map', 
-                                                           shape=(self.solver_invariant_mat.shape[0], self.num_oml_output_points))
+        # inv_term = incoming_projection_T_times_solver_mat@pinv_incoming_projection_T_times_solver_mat
 
-        # import solver -> oml map on the other side of the aeroelastic coupling diagram
-        solver_to_oml_map = csdl_map.register_module_input(name='wing_force_map', shape=(self.num_oml_dual_variable_points, self.solver_invariant_mat.shape[1]))
+        # TODO: Matrix below could be made more sparse, by switching the inverse-distance weighting to a function with a compact support
+        # construct the projection matrix itself
+        proj_mat_T = framework_mat_times_otherside_composition_stacked@pinv_incoming_projection_T_times_solver_mat
+        proj_mat = proj_mat_T.T
 
-        # import oml -> framework map on the other side of the aeroelastic coupling diagram
-        oml_to_framework_map_list = []
-        total_oml_to_framework_map_rows = 0
-        for surf_name in self.vector_surface_order:
-            total_oml_to_framework_map_rows += np.prod(self.function.coefficients[surf_name].shape[:-1])
-            oml_to_framework_map = csdl_map.register_module_input(name='fitting_matrix_{}'.format(surf_name), shape=(np.prod(self.function.coefficients[surf_name].shape[:-1]), self.num_oml_dual_variable_points))
-            oml_to_framework_map_list += [oml_to_framework_map]
-
-        # we combine all `oml_to_framework_map` instances into a single big array
-        oml_to_framework_maps_all_surfaces = csdl_map.create_output(name='oml_to_framework_maps_all_surfaces', shape=(total_oml_to_framework_map_rows, self.num_oml_dual_variable_points))
-        current_insert_start = 0
-        current_insert_end = 0  # oml_to_framework_map_list[0].shape[0]
-        for oml_to_framework_object in oml_to_framework_map_list:
-            current_insert_end += oml_to_framework_object.shape[0]
-            oml_to_framework_maps_all_surfaces[current_insert_start:current_insert_end, :] = oml_to_framework_object
-            current_insert_start += oml_to_framework_object.shape[0]
-
-        # Now that we have all three of the component-specific maps we stack each one three times along the diagonal of larger matrices,
-        # so that later on we can directly matvec multiply the [x; y; z] input vector to obtain the corresponding output
-        
-        # First we define the stacked csdl objects
-        # oml_to_solver_map_stacked = csdl_map.create_output(name='oml_to_solver_map_stacked', shape=(3*self.solver_invariant_mat.shape[0], 3*self.num_oml_output_points))
-        # solver_to_oml_map_stacked = csdl_map.create_output(name='solver_to_oml_map_stacked', shape=(3*self.num_oml_dual_variable_points, 3*self.solver_invariant_mat.shape[1]))
-        # oml_to_framework_maps_all_surfaces_stacked = csdl_map.create_output(name='oml_to_framework_maps_all_surfaces_stacked', shape=(3*total_oml_to_framework_map_rows, 3*self.num_oml_dual_variable_points))
-
-        # loop over all three principal directions (x, y, z) and fill the corresponding diagonal blocks each time
-        # for i in range(3):
-            # oml_to_solver_map_stacked[i*self.solver_invariant_mat.shape[0]:(i+1)*self.solver_invariant_mat.shape[0], i*self.num_oml_output_points:(i+1)*self.num_oml_output_points] = 1*oml_to_solver_map
-            # solver_to_oml_map_stacked[i*self.num_oml_dual_variable_points:(i+1)*self.num_oml_dual_variable_points, i*self.solver_invariant_mat.shape[1]:(i+1)*self.solver_invariant_mat.shape[1]] = 1*solver_to_oml_map
-            # oml_to_framework_maps_all_surfaces_stacked[i*total_oml_to_framework_map_rows:(i+1)*total_oml_to_framework_map_rows, i*self.num_oml_dual_variable_points:(i+1)*self.num_oml_dual_variable_points] = 1*oml_to_framework_maps_all_surfaces
-            # oml_to_solver_map_mult = 1*oml_to_solver_map_mult
-
-        # Now we have all three stacked maps and the stacked invariant matrices are stored in `self`, so we can compute the work-conserving projection map
-        otherside_composition_map = csdl.matmat(oml_to_framework_maps_all_surfaces, solver_to_oml_map)
-        framework_mat_times_otherside_composition = csdl.matmat(framework_invariant_mat, otherside_composition_map)
-
-        # we stack the matrix above three times along the diagonal
-        framework_mat_times_otherside_composition_stacked = csdl_map.create_output(name='framework_mat_times_otherside_composition_stacked', shape=(3*framework_mat_times_otherside_composition.shape[0], 3*framework_mat_times_otherside_composition.shape[1]))
-        for i in range(3):
-            framework_mat_times_otherside_composition_stacked[i*framework_mat_times_otherside_composition.shape[0]:(i+1)*framework_mat_times_otherside_composition.shape[0], i*framework_mat_times_otherside_composition.shape[1]:(i+1)*framework_mat_times_otherside_composition.shape[1]] = 1*framework_mat_times_otherside_composition
-
-        # we hack our way to computing the pseudo-inverse of the product of two matrices 
-        oml_to_solver_map_transpose = csdl.transpose(oml_to_solver_map)
-        oml_to_solver_map_T_times_solver_mat = csdl.matmat(oml_to_solver_map_transpose, solver_invariant_mat)
-
-        # we repeat the matrix three times along the diagonal, compute the pseudo-inverse with Numpy and then convert it back to a CSDL object
-        pinv_oml_to_solver_map_T_times_solver_mat = np.linalg.pinv(sps.block_diag([oml_to_solver_map_T_times_solver_mat.val]*3).toarray())
-        pinv_oml_to_solver_map_T_times_solver_mat_csdl = csdl_map.create_input(name='pinv_oml_to_solver_map_T_times_solver_mat', val=pinv_oml_to_solver_map_T_times_solver_mat)
-
-        # Now we can finally construct the actual projection matrix
-        proj_mat_transpose = csdl.matmat(framework_mat_times_otherside_composition_stacked, pinv_oml_to_solver_map_T_times_solver_mat_csdl)
-        proj_mat = csdl.transpose(proj_mat_transpose)
+        proj_mat_csdl = csdl_map.register_module_input('conservative_projection_matrix', shape=proj_mat.shape,
+                                                                    val=proj_mat)
 
         # after having constructed the projection matrix we construct the vector that will contain the framework coefficients
         
@@ -820,7 +772,7 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         coefficients_concatenated_csdl_flat = csdl.reshape(coefficients_concatenated_csdl, (coefficients_cumsum_per_coordinate[-1]*3,))
 
         # Now we FINALLY multiply the projection matrix with the flattened coefficient array
-        output_oml_coefficients = csdl.matvec(proj_mat, coefficients_concatenated_csdl_flat)
+        output_oml_coefficients = csdl.matvec(proj_mat_csdl, coefficients_concatenated_csdl_flat)
         output_oml_coefficients_reshaped = csdl.reshape(output_oml_coefficients, (self.num_oml_output_points, 3))
         output_map = csdl_map.create_output(f'evaluated_{self.function.name}', shape=output_oml_coefficients_reshaped.shape)
         output_map[:, :] = output_oml_coefficients_reshaped
@@ -840,7 +792,7 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         '''
         pass
 
-    def evaluate(self, num_oml_output_points):
+    def evaluate(self, composition_mat, otherside_composed_mat):
         '''
         User-facing method that the user will call to define a model evaluation.
 
@@ -870,12 +822,170 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
 
         self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
         self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
+        self.composition_mat = composition_mat
+        self.otherside_composed_mat = otherside_composed_mat
 
         # Create the M3L variables that are being output
-        output_shape = (num_oml_output_points, self.function.coefficients[self.vector_surface_order[0]].shape[-1])
+        output_shape = (self.num_oml_output_points, self.function.coefficients[self.vector_surface_order[0]].shape[-1])
 
         function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
         return function_values
+
+    # def compute(self):
+    #     '''
+    #     Creates the CSDL model to compute the function evaluation.
+
+    #     Returns
+    #     -------
+    #     csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+    #         The csdl model or module that computes the model/operation outputs.
+    #     '''
+    #     csdl_map = ModuleCSDL()
+
+    #     # register the solver and framework invariant matrices
+    #     solver_invariant_mat = csdl_map.register_module_input(name='solver_invariant_mat', 
+    #                                                        val=self.solver_invariant_mat.toarray())
+    #     framework_invariant_mat = csdl_map.register_module_input(name='framework_invariant_mat', 
+    #                                                        val=self.framework_invariant_mat.toarray())        
+
+    #     # import oml -> solver map (that is applied directly after the current map)
+    #     oml_to_solver_map = csdl_map.register_module_input(name='wing_displacement_input_function_displacements_map', 
+    #                                                        shape=(self.solver_invariant_mat.shape[1], self.num_oml_output_points))
+
+    #     # import solver -> oml map on the other side of the aeroelastic coupling diagram
+    #     solver_to_oml_map = csdl_map.register_module_input(name='wing_force_map', shape=(self.num_oml_dual_variable_points, self.solver_invariant_mat.shape[0]))
+
+    #     # import oml -> framework map on the other side of the aeroelastic coupling diagram
+    #     oml_to_framework_map_list = []
+    #     total_oml_to_framework_map_rows = 0
+    #     for surf_name in self.vector_surface_order:
+    #         # TODO: Replace the shape of the `self.function` (displacement) term below with the number of points that are used to represent the force on the framework
+    #         total_oml_to_framework_map_rows += np.prod(self.function.coefficients[surf_name].shape[:-1])
+    #         oml_to_framework_map = csdl_map.register_module_input(name='fitting_matrix_{}'.format(surf_name), shape=(np.prod(self.function.coefficients[surf_name].shape[:-1]), self.num_oml_dual_variable_points))
+    #         oml_to_framework_map_list += [oml_to_framework_map]
+
+    #     # we combine all `oml_to_framework_map` instances into a single big array
+    #     oml_to_framework_maps_all_surfaces = csdl_map.create_output(name='oml_to_framework_maps_all_surfaces', shape=(total_oml_to_framework_map_rows, self.num_oml_dual_variable_points))
+    #     current_insert_start = 0
+    #     current_insert_end = 0  # oml_to_framework_map_list[0].shape[0]
+    #     for oml_to_framework_object in oml_to_framework_map_list:
+    #         current_insert_end += oml_to_framework_object.shape[0]
+    #         oml_to_framework_maps_all_surfaces[current_insert_start:current_insert_end, :] = oml_to_framework_object
+    #         current_insert_start += oml_to_framework_object.shape[0]
+
+    #     # Now that we have all three of the component-specific maps we stack each one three times along the diagonal of larger matrices,
+    #     # so that later on we can directly matvec multiply the [x; y; z] input vector to obtain the corresponding output
+        
+    #     # First we define the stacked csdl objects
+    #     # oml_to_solver_map_stacked = csdl_map.create_output(name='oml_to_solver_map_stacked', shape=(3*self.solver_invariant_mat.shape[0], 3*self.num_oml_output_points))
+    #     # solver_to_oml_map_stacked = csdl_map.create_output(name='solver_to_oml_map_stacked', shape=(3*self.num_oml_dual_variable_points, 3*self.solver_invariant_mat.shape[1]))
+    #     # oml_to_framework_maps_all_surfaces_stacked = csdl_map.create_output(name='oml_to_framework_maps_all_surfaces_stacked', shape=(3*total_oml_to_framework_map_rows, 3*self.num_oml_dual_variable_points))
+
+    #     # loop over all three principal directions (x, y, z) and fill the corresponding diagonal blocks each time
+    #     # for i in range(3):
+    #         # oml_to_solver_map_stacked[i*self.solver_invariant_mat.shape[0]:(i+1)*self.solver_invariant_mat.shape[0], i*self.num_oml_output_points:(i+1)*self.num_oml_output_points] = 1*oml_to_solver_map
+    #         # solver_to_oml_map_stacked[i*self.num_oml_dual_variable_points:(i+1)*self.num_oml_dual_variable_points, i*self.solver_invariant_mat.shape[1]:(i+1)*self.solver_invariant_mat.shape[1]] = 1*solver_to_oml_map
+    #         # oml_to_framework_maps_all_surfaces_stacked[i*total_oml_to_framework_map_rows:(i+1)*total_oml_to_framework_map_rows, i*self.num_oml_dual_variable_points:(i+1)*self.num_oml_dual_variable_points] = 1*oml_to_framework_maps_all_surfaces
+    #         # oml_to_solver_map_mult = 1*oml_to_solver_map_mult
+
+    #     # Now we have all three stacked maps and the stacked invariant matrices are stored in `self`, so we can compute the work-conserving projection map
+    #     otherside_composition_map = csdl.matmat(oml_to_framework_maps_all_surfaces, solver_to_oml_map)
+    #     framework_mat_times_otherside_composition = csdl.matmat(framework_invariant_mat, otherside_composition_map)
+
+    #     # we stack the matrix above three times along the diagonal
+    #     framework_mat_times_otherside_composition_stacked = csdl_map.create_output(name='framework_mat_times_otherside_composition_stacked', shape=(3*framework_mat_times_otherside_composition.shape[0], 3*framework_mat_times_otherside_composition.shape[1]))
+    #     for i in range(3):
+    #         framework_mat_times_otherside_composition_stacked[i*framework_mat_times_otherside_composition.shape[0]:(i+1)*framework_mat_times_otherside_composition.shape[0], i*framework_mat_times_otherside_composition.shape[1]:(i+1)*framework_mat_times_otherside_composition.shape[1]] = 1*framework_mat_times_otherside_composition
+
+    #     # we hack our way to computing the pseudo-inverse of the product of two matrices 
+    #     oml_to_solver_map_transpose = csdl.transpose(oml_to_solver_map)
+    #     oml_to_solver_map_T_times_solver_mat = csdl.matmat(oml_to_solver_map_transpose, solver_invariant_mat)
+
+    #     # we repeat the matrix three times along the diagonal, compute the pseudo-inverse with Numpy and then convert it back to a CSDL object
+    #     pinv_oml_to_solver_map_T_times_solver_mat = np.linalg.pinv(sps.block_diag([oml_to_solver_map_T_times_solver_mat.val]*3).toarray())
+    #     pinv_oml_to_solver_map_T_times_solver_mat_csdl = csdl_map.create_input(name='pinv_oml_to_solver_map_T_times_solver_mat', val=pinv_oml_to_solver_map_T_times_solver_mat)
+
+    #     # Now we can finally construct the actual projection matrix
+    #     proj_mat_transpose = csdl.matmat(framework_mat_times_otherside_composition_stacked, pinv_oml_to_solver_map_T_times_solver_mat_csdl)
+    #     proj_mat = csdl.transpose(proj_mat_transpose)
+
+    #     # after having constructed the projection matrix we construct the vector that will contain the framework coefficients
+        
+    #     coeff_arr_list = []
+    #     coefficients_cumsum_per_coordinate = [0]
+    #     for surf_name in self.vector_surface_order:
+    #         coeff_arr = self.function.coefficients[surf_name]
+    #         coeff_arr_reshaped = coeff_arr.value.reshape((-1, coeff_arr.shape[-1]))
+    #         coeff_arr_reshaped_csdl = csdl_map.register_module_input(coeff_arr.name, shape=coeff_arr_reshaped.shape,
+    #                                                                 val=coeff_arr_reshaped)
+    #         coeff_arr_list += [coeff_arr_reshaped_csdl]
+    #         coefficients_cumsum_per_coordinate += [coefficients_cumsum_per_coordinate[-1] + coeff_arr_reshaped.shape[0]]
+        
+    #     # create CSDL array that contains all coefficients
+    #     coefficients_concatenated_csdl = csdl_map.create_output(name='inp_coefficients_concatenated',shape=(coefficients_cumsum_per_coordinate[-1], 3))
+    #     for i in range(len(coeff_arr_list)):
+    #         coefficients_concatenated_csdl[coefficients_cumsum_per_coordinate[i]:coefficients_cumsum_per_coordinate[i+1], :] = coeff_arr_list[i]
+        
+    #     # next we reshape the concatenated coefficient array by stacking its columns on top of one another
+    #     coefficients_concatenated_csdl_flat = csdl.reshape(coefficients_concatenated_csdl, (coefficients_cumsum_per_coordinate[-1]*3,))
+
+    #     # Now we FINALLY multiply the projection matrix with the flattened coefficient array
+    #     output_oml_coefficients = csdl.matvec(proj_mat, coefficients_concatenated_csdl_flat)
+    #     output_oml_coefficients_reshaped = csdl.reshape(output_oml_coefficients, (self.num_oml_output_points, 3))
+    #     output_map = csdl_map.create_output(f'evaluated_{self.function.name}', shape=output_oml_coefficients_reshaped.shape)
+    #     output_map[:, :] = output_oml_coefficients_reshaped
+
+    #     return csdl_map
+    
+    # def compute_derivates(self):
+    #     '''
+    #     -- optional --
+    #     Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+    #     For now, I would recommend coming back to this.
+
+    #     Returns
+    #     -------
+    #     derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+    #         The csdl model or module that computes the derivatives of the model/operation outputs.
+    #     '''
+    #     pass
+
+    # def evaluate(self, num_oml_output_points):
+    #     '''
+    #     User-facing method that the user will call to define a model evaluation.
+
+    #     Parameters
+    #     ----------
+    #     mesh : Variable
+    #         The mesh over which the function will be evaluated.
+
+    #     Returns
+    #     -------
+    #     function_values : Variable
+    #         The values of the function at the mesh locations.
+    #     '''
+    #     self.name = f'{self.function.name}_evaluation'
+
+    #     # Define operation arguments
+    #     # surface_names = []
+    #     # for item in self.indexed_mesh:
+    #     #     name = item[0]
+    #     #     if not name in surface_names:
+    #     #         surface_names.append(name)
+    #     self.arguments = {}
+    #     coefficients = self.function.coefficients
+    #     for name in self.vector_surface_order:
+    #         self.arguments[coefficients[name].name] = coefficients[name]
+    #     self.arguments = self.function.coefficients
+
+    #     self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
+    #     self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
+
+    #     # Create the M3L variables that are being output
+    #     output_shape = (num_oml_output_points, self.function.coefficients[self.vector_surface_order[0]].shape[-1])
+
+    #     function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
+    #     return function_values
 
 
 class IndexedFunctionEvaluation(ExplicitOperation):
