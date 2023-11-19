@@ -230,6 +230,12 @@ class Variable:
         self.value = new_me.value
     
     def __len__(self):
+        if self.operation is None:
+            print(self.name, self.shape)
+        else:
+            print(self.operation.name, self.name, self.shape)
+
+
         return self.shape[0]
 
     def __add__(self, other):
@@ -1187,7 +1193,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
     def gather_operations(self, variable:Variable):
         if variable:
-            # print(variable)
             if variable.operation is not None:
                 operation = variable.operation
                 for input_name, input in operation.arguments.items():
@@ -1241,6 +1246,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # exit()
         # Assemble output states
         for output_name, output in self.outputs.items():
+            print('------------------------------------------', output_name)
             self.gather_operations(output)
         
         model_csdl = csdl.Model()

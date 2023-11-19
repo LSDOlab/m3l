@@ -24,7 +24,10 @@ class Norm(ExplicitOperation):
         
         csdl_model = csdl.Model()
         x_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x', shape=x.shape)
-        y = csdl.pnorm(x_csdl, pnorm_type=order, axis=axes)
+        if len(x.shape) == len(axes):
+            y = csdl.pnorm(x_csdl, pnorm_type=order)
+        else:
+            y = csdl.pnorm(x_csdl, pnorm_type=order, axis=axes)
         csdl_model.register_output(name=self.output_name, var=y)
         return csdl_model
 
@@ -690,13 +693,14 @@ class Division(ExplicitOperation):
         self.output_name = output.name
         self.arguments = {f'{self.output_name}_x1' : x1, f'{self.output_name}_x2' : x2}
 
-        # create csdl model for in-line evaluations
-        operation_csdl = self.compute()
-        sim = Simulator(operation_csdl)
-        sim[f'{self.output_name}_x1'] = x1.value
-        sim[f'{self.output_name}_x2'] = x2.value
-        sim.run()
-        output.value = sim[self.output_name]
+        if (x1.value is not None) and (x2.value is not None):
+            # create csdl model for in-line evaluations
+            operation_csdl = self.compute()
+            sim = Simulator(operation_csdl)
+            sim[f'{self.output_name}_x1'] = x1.value
+            sim[f'{self.output_name}_x2'] = x2.value
+            sim.run()
+            output.value = sim[self.output_name]
         return output
     
 
@@ -808,6 +812,8 @@ class Sum(ExplicitOperation):
             if axis not in self.axes:
                 output_shape.append(x.shape[axis])
         output_shape = tuple(output_shape)
+        if not output_shape:
+            output_shape = (1, )
         output = Variable(shape=output_shape, operation=self)
         self.output_name = output.name
 
