@@ -22,8 +22,10 @@ class Norm(ExplicitOperation):
         
         csdl_model = csdl.Model()
         x_csdl = csdl_model.declare_variable(name='x', shape=x.shape)
-        y = csdl.pnorm(x_csdl, pnorm_type=order, axis=axes)
-        output_name = replace_periods_with_underscores(f'{x.name}_norm')
+        if len(x.shape) == len(axes):
+            y = csdl.pnorm(x_csdl, pnorm_type=order)
+        else:
+            y = csdl.pnorm(x_csdl, pnorm_type=order, axis=axes)
         csdl_model.register_output(name=self.output_name, var=y)
         return csdl_model
 
@@ -51,7 +53,6 @@ class Norm(ExplicitOperation):
         
         if len(out_shape) == 0:
             out_shape = (1, )
-        output_name = replace_periods_with_underscores(f'{x.name}_norm')
         norm = Variable(shape=out_shape, operation=self)
         self.output_name = norm.name
 
@@ -60,7 +61,7 @@ class Norm(ExplicitOperation):
         sim = Simulator(operation_csdl)
         sim['x'] = x.value
         sim.run()
-        norm.value = sim[output_name]
+        norm.value = sim[self.output_name]
 
         return norm
 
@@ -464,7 +465,7 @@ class Reshape(ExplicitOperation):
         output : Variable
             The reshaped variable.
         '''
-        self.name = f'{x.name}_reshaped_operation_to_{self.shape}'
+        self.name = f'{x.name}_reshape_operation'
         self.parameters['name'] = self.name
 
         # Define operation arguments

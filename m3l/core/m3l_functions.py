@@ -269,6 +269,8 @@ def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
     # else:
     #     x_flat = x
 
+    import m3l
+
     # updated component
     map_num_outputs = x.shape[0]
     map_num_inputs = indices.shape[0]
@@ -285,7 +287,8 @@ def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
     unchanged_indexing_map = sps.coo_matrix((data, (unchanged_indices, unchanged_indices)),
                                 shape=(x.shape[0], x.shape[0]))
     unchanged_indexing_map = unchanged_indexing_map.tocsc()
-    x_unchanged = matvec(map=unchanged_indexing_map, x=x)
+    # x_unchanged = matvec(map=unchanged_indexing_map, x=x)
+    x_unchanged = matvec(map=unchanged_indexing_map, x=x.copy())
 
     new_x = x_updated + x_unchanged
 

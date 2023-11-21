@@ -227,9 +227,20 @@ class Variable:
     def __setitem__(self, indices, value):
         import m3l
         new_me = m3l.variable_set_item(self, indices, value)
+        # self = new_me
+        # hello = False
+        
+        # if hello:
+        #     print('operation_before', self.operation.arguments['x2'].operation.arguments['x'].name)
+        #     self.name = new_me.name
+        #     print('operation_middle', self.operation.arguments['x2'].operation.arguments['x'].name)
+        #     self.operation = new_me.operation
+        #     print('operation_after', self.operation.arguments['x2'].operation.arguments['x'].name)
+        # else:
         self.name = new_me.name
         self.operation = new_me.operation
         self.value = new_me.value
+
     
     def __len__(self):
         return self.shape[0]
@@ -918,7 +929,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         Constructs a model group.
         '''
         self.models = {}
-        self.operations = {}
+        # self.operations = {}
+        self.operations = []
         self.outputs = {}
         self.parameters = None
         self.constraints = []
@@ -1187,20 +1199,129 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         m3l_var.scaler = scaler
         self.objective = m3l_var
 
-    def gather_operations(self, variable:Variable):
-        if variable:
-            # print(variable)
-            if variable.operation is not None:
-                operation = variable.operation
-                for input_name, input in operation.arguments.items():
-                    if input is not None:
-                        self.gather_operations(input)
+    # def gather_operations(self, variable:Variable):
+    #     print(self.depth)
+    #     self.depth += 1
+    #     if variable:
+    #         # print(variable)
+    #         if variable.operation is not None:
+    #             operation = variable.operation
+    #             for input_name, input in operation.arguments.items():
+    #                 if input is not None:
+    #                     self.gather_operations(input)
 
-                if operation.name not in self.operations:
-                    self.operations[operation.name] = operation
-            else:
-                pass
+    #             if operation.name not in self.operations:
+    #                 self.operations[operation.name] = operation
+    #         else:
+    #             pass
                 # print(f'Variable {variable.name} is not part of an operation')
+    
+    # def gather_operations(self, variable:Variable):
+    #     print(self.depth)
+    #     self.depth += 1
+    #     if variable:
+    #         # print(variable)
+    #         if variable.operation is not None:
+    #             operation = variable.operation
+    #             for input_name, input in operation.arguments.items():
+    #                 if input is not None:
+    #                     self.gather_operations(input)
+
+    #             is_already_added = self.check_if_operation_has_been_added(operation)
+
+    #             if not is_already_added:
+    #                 self.operations.append(operation)
+    #         else:
+    #             pass
+
+    # def gather_operations(self, variable:Variable):
+    #     '''
+    #     Non-recursive implementation of gather operations to avoid recursion depth limit.
+    #     '''
+    #     all_none = False
+    #     while not all_none:
+
+    #     operation = variable.operation
+    #     while operation is not None:
+    #         for input_name, input in operation.arguments.items():
+    #             if input.operation is None:
+    #                 continue
+    #             operation = input.operation
+    #             operation_is_already_added = self.check_if_operation_has_been_added(operation)
+    #             if not operation_is_already_added:
+    #                 self.operations.append(operation)
+
+    #     self.operations.reverse()   # Do I want to do this? I think so. It's depth-based either way which is not that intuitive but easier.
+
+    def check_if_operation_has_been_added(self, operation:Operation):
+        '''
+        Checks if this operation has already been added to the model.
+        '''
+        for model_operation in self.operations:
+            if operation is model_operation:
+                return True
+            
+    def check_if_variable_is_in_list(self, variable:Variable, stack:list):
+        '''
+        Checks if this operation has already been added to the model.
+        '''
+        for variable_in_stack in stack:
+            if variable is variable_in_stack:
+                return True
+
+    # def gather_operations(self, variable: Variable):
+    #     total_stack = []
+    #     stack = []
+    #     stack.append(variable)
+
+    #     while stack:
+    #         current_variable = stack.pop()
+    #         if current_variable:
+    #             if current_variable.operation is not None:
+    #                 operation = current_variable.operation
+
+    #                 for input_name, input in operation.arguments.items():
+    #                     if input is not None:
+    #                         variable_is_added_to_stack = self.check_if_variable_is_in_list(input, total_stack)
+
+    #                         if not variable_is_added_to_stack:
+    #                             stack.append(input)
+    #                             total_stack.append(input)
+
+    #                 operation_is_added = self.check_if_operation_has_been_added(operation)
+
+    #                 if not operation_is_added:
+    #                     # self.operations[operation.name] = operation
+    #                     self.operations.append(operation)
+    #             else:
+    #                 pass
+
+    #     self.operations.reverse()
+
+    def gather_operations(self, variable: Variable):
+        from collections import deque
+        total_stack = []
+        stack = deque([variable])
+
+        while stack:
+            current_variable = stack.popleft()
+
+            if current_variable:
+                if current_variable.operation is not None:
+                    operation = current_variable.operation
+                    is_already_added = self.check_if_operation_has_been_added(operation)
+
+                    if not is_already_added:
+                        self.operations.append(operation)
+
+                    for input_name, input in operation.arguments.items():
+                        variable_is_already_added = self.check_if_variable_is_in_list(input, total_stack)
+                        if not variable_is_already_added:
+                            stack.append(input)
+                            total_stack.append(input)
+
+        self.operations.reverse()
+
 
     def gather_operations_implicit(self, variable:Variable):
         if variable.operation is not None:
@@ -1237,7 +1358,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     #     return self.csdl_model
     
 
-    def assemble(self):
+    def assemble(self) -> csdl.Model:
+        self.depth = 0
         
         # print(self.outputs.items())
         # exit()
@@ -1247,7 +1369,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         
         model_csdl = csdl.Model()
 
-        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+        # for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+        for operation in self.operations:
+            operation_name = operation.name
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
                 if issubclass(type(operation_csdl), csdl.Model):
@@ -1333,10 +1457,102 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         return self.csdl_model
 
 
-    def assemble_csdl(self) -> ModuleCSDL:
+    def assemble_csdl(self) -> csdl.Model:
         self.assemble()
 
         return self.csdl_model
+    
+
+    def assemble_derivative_model(self) -> csdl.Model:
+        for output_name, output in self.outputs.items():
+            self.gather_operations(output)
+        
+        derivative_model_csdl = csdl.Model()
+
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+            if issubclass(type(operation), ExplicitOperation):
+                operation_csdl = operation.compute()
+                if issubclass(type(operation_csdl), csdl.Model):
+                    derivative_model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                elif issubclass(type(operation_csdl), ModuleCSDL):
+                    derivative_model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                else:
+                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
+
+
+                if not operation.arguments and 'connect_from' in operation.parameters:
+                    for i in range(len(operation.parameters['connect_from'])):
+                        connect_from = operation.parameters['connect_from'][i]
+                        connect_to = operation.parameters['connect_to'][i]
+                        derivative_model_csdl.connect(connect_from, connect_to) 
+
+                else:
+                    for input_name, input in operation.arguments.items():
+                        if input:
+                            if input.operation is not None: # If the input is associated with an operation
+                                    derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
+                            else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
+                                if input not in self.user_inputs:
+                                    derivative_model_csdl.create_input(input.name, val=input.value)
+
+                                derivative_model_csdl.connect(input.name, operation_name+"."+input_name) 
+                    
+            # Just gonna ignore this for now
+            # if issubclass(type(operation), ImplicitOperation):
+            #     # TODO: also take input_jacobian
+            #     jacobian_csdl_model = operation.compute_derivatives()
+            #     if issubclass(type(jacobian_csdl_model), csdl.Model):
+            #     # if type(jacobian_csdl_model) is csdl.Model:
+            #         derivative_model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+            #     elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
+            #         derivative_model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+            #     else:
+            #         raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+            #     for input_name, input in operation.arguments.items():
+            #         if input.operation is not None and input is not None:
+            #             derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+            #     for key, value in operation.residual_partials.items():
+            #         derivative_model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
+                    
+            #         derivative_model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
+
+        # Create any user-defined inputs
+        for input in self.user_inputs:
+            var_name = input.name
+            var_val = input.value
+            var_shape = input.shape
+            dv_flag = input.dv_flag
+
+            derivative_model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
+
+            if dv_flag:
+                lower = input.lower
+                upper = input.upper
+                scaler = input.scaler
+                derivative_model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+
+        
+        # Add constraints and objective
+        for var in self.constraints:
+            var_name = var.name
+            lower = var.lower
+            upper = var.upper
+            equals = var.equals
+            scaler = var.scaler
+            operation = var.operation
+            operation_name = operation.name
+
+            derivative_model_csdl.add_constraint(name=f"{operation_name}.{var_name}", lower=lower, upper=upper, equals=equals, scaler=scaler)
+
+        if self.objective:
+            var_name = self.objective.name
+            scaler = self.objective.scaler
+            operation = self.objective.operation
+            operation_name = self.objective.operation.name
+            derivative_model_csdl.add_objective(name=f"{operation_name}.{var_name}", scaler=scaler)
+
+        return derivative_model_csdl
 
     # parameters - list[(name, dynamic?, value(s))]
     def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
