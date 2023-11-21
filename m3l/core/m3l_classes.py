@@ -7,8 +7,6 @@ from scipy import linalg
 # import array_mapper as am
 # import scipy.sparse as sps
 import csdl
-from lsdo_modules.module_csdl.module_csdl import ModuleCSDL
-from lsdo_modules.module.module import Module
 from typing import Union
 from m3l.utils.base_class import OperationBase
 from ozone.api import ODEProblem
@@ -38,7 +36,7 @@ from m3l.core.csdl_operations import Eig, EigExplicit
 #     arguments : dict
 
 
-class Operation(Module):
+class Operation(OperationBase):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.assign_attributes()  # Added this to make code more developer friendly (more familiar looking)
@@ -86,8 +84,8 @@ class ExplicitOperation(Operation):
 
         Returns
         -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
+        csdl_model : {csdl.Model}
+            The csdl model that computes the model/operation outputs.
         '''
         pass
 
@@ -99,8 +97,8 @@ class ExplicitOperation(Operation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model  that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -136,8 +134,8 @@ class ImplicitOperation(Operation):
 
         Returns
         -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the residuals.
+        csdl_model : {csdl.Model}
+            The csdl model  that computes the residuals.
         '''
         pass
 
@@ -148,8 +146,8 @@ class ImplicitOperation(Operation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model  that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -166,8 +164,8 @@ class ImplicitOperation(Operation):
 
         Returns
         -------
-        invariant_matrix_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the invariant matrix for the SIFR methodology.
+        invariant_matrix_csdl_model : {csdl.Model}
+            The csdl model  that computes the invariant matrix for the SIFR methodology.
         '''
         pass
 
@@ -243,6 +241,12 @@ class Variable:
 
     
     def __len__(self):
+        if self.operation is None:
+            print(self.name, self.shape)
+        else:
+            print(self.operation.name, self.name, self.shape)
+
+
         return self.shape[0]
 
     def __add__(self, other):
@@ -362,9 +366,8 @@ class Function:
         # output_name = f'nodal_{self.name}'
         # output_shape = tuple(mesh.shape[:-1]) + (self.coefficients.shape[-1],)
 
-        # # csdl_map = csdl.Model()
-        # csdl_map = ModuleCSDL()
-        # function_coefficients = csdl_map.register_module_input(self.coefficients.name, shape=(num_coefficients, self.coefficients.shape[-1]))
+        # csdl_map = csdl.Model()
+        # function_coefficients = csdl_map.declare_variable(self.coefficients.name, shape=(num_coefficients, self.coefficients.shape[-1]))
         # map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map', temp_map)
         # flattened_function_values_csdl = csdl.matmat(map_csdl, function_coefficients)
         # function_values_csdl = csdl.reshape(flattened_function_values_csdl, new_shape=output_shape)
@@ -400,9 +403,8 @@ class Function:
         num_values = np.prod(function_values.shape[:-1])
         temp_map = np.eye(self.function_space.num_coefficients, num_values)
 
-        # csdl_map = csdl.Model()
-        csdl_map = ModuleCSDL()
-        function_values_csdl = csdl_map.register_module_input(function_values.name, shape=(num_values,3))
+        csdl_map = csdl.Model()
+        function_values_csdl = csdl_map.declare_variable(function_values.name, shape=(num_values,3))
         map_csdl = csdl_map.create_input(f'{self.name}_inverse_evaluation_map', temp_map)
         function_coefficients_csdl = csdl.matmat(map_csdl, function_values_csdl)
         csdl_map.register_output(f'{self.name}_coefficients', function_coefficients_csdl)
@@ -431,8 +433,8 @@ class FunctionEvaluation(ExplicitOperation):
 
         Returns
         -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
+        csdl_model : {csdl.Model}
+            The csdl model  that computes the model/operation outputs.
         '''
 
         mesh = self.mesh
@@ -446,8 +448,8 @@ class FunctionEvaluation(ExplicitOperation):
         output_name = f'evaluated_{self.function.name}'
         output_shape = tuple(mesh.shape[:-1]) + (coefficients.shape[-1],)
 
-        csdl_map = ModuleCSDL()
-        function_coefficients = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+        csdl_map = csdl.Model()
+        function_coefficients = csdl_map.declare_variable(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
                                                                 val=coefficients.value.reshape((-1, coefficients.shape[-1])))
         map_csdl = csdl_map.create_input(f'{self.name}_evaluation_map', temp_map)
         flattened_function_values_csdl = csdl.matmat(map_csdl, function_coefficients)
@@ -463,8 +465,8 @@ class FunctionEvaluation(ExplicitOperation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model  that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -590,8 +592,8 @@ class IndexedFunctionEvaluation(ExplicitOperation):
 
         Returns
         -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
+        csdl_model : {csdl.Model}
+            The csdl model  that computes the model/operation outputs.
         '''
 
         associated_coords = {}
@@ -608,23 +610,23 @@ class IndexedFunctionEvaluation(ExplicitOperation):
 
         output_name = f'evaluated_{self.function.name}'
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
-        csdl_map = ModuleCSDL()
+        csdl_map = csdl.Model()
         points = csdl_map.create_output(output_name, shape=output_shape)
         
         coefficients_csdl = {} 
         for key, coefficients in self.function.coefficients.items():
             num_coefficients = np.prod(coefficients.shape[:-1])
             if coefficients.value is None:
-                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
+                coefficients_csdl[key] = csdl_map.declare_variable(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
             else:
-                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+                coefficients_csdl[key] = csdl_map.declare_variable(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
                                                                     val=coefficients.value.reshape((-1, coefficients.shape[-1])))
 
         for key, value in associated_coords.items():
             evaluation_matrix = self.function.space.spaces[key].compute_evaluation_map(value[1])
             if sps.issparse(evaluation_matrix):
                 evaluation_matrix = evaluation_matrix.toarray()
-            evaluation_matrix_csdl = csdl_map.register_module_input('evaluation_matrix_'+key, val=evaluation_matrix, shape = evaluation_matrix.shape, computed_upstream=False)
+            evaluation_matrix_csdl = csdl_map.declare_variable('evaluation_matrix_'+key, val=evaluation_matrix, shape = evaluation_matrix.shape, computed_upstream=False)
             associated_function_values = csdl.matmat(evaluation_matrix_csdl, coefficients_csdl[key])
             for i in range(len(value[0])):
                 points[value[0][i],:] = associated_function_values[i,:]
@@ -653,8 +655,8 @@ class IndexedFunctionEvaluation(ExplicitOperation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model  that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -713,8 +715,8 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
 
         Returns
         -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
+        csdl_model : {csdl.Model}
+            The csdl model  that computes the model/operation outputs.
         '''
 
         associated_coords = {}
@@ -733,16 +735,16 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
         if not self.input_name is None:
             output_name = output_name + '_' + self.input_name
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
-        csdl_map = ModuleCSDL()
+        csdl_map = csdl.Model()
         points = csdl_map.create_output(output_name, shape=output_shape)
         
         coefficients_csdl = {} 
         for key, coefficients in self.function.coefficients.items():
             num_coefficients = np.prod(coefficients.shape[:-1])
             if coefficients.value is None:
-                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
+                coefficients_csdl[key] = csdl_map.declare_variable(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]))
             else:
-                coefficients_csdl[key] = csdl_map.register_module_input(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+                coefficients_csdl[key] = csdl_map.declare_variable(coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
                                                                     val=coefficients.value.reshape((-1, coefficients.shape[-1])))
 
         for key, value in associated_coords.items():
@@ -752,8 +754,8 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
                 evaluation_matrix_u = evaluation_matrix_u.toarray()
                 evaluation_matrix_v = evaluation_matrix_v.toarray()
 
-            evaluation_matrix_u_csdl = csdl_map.register_module_input('evaluation_matrix_u_'+key, val=evaluation_matrix_u, shape = evaluation_matrix_u.shape, computed_upstream=False)
-            evaluation_matrix_v_csdl = csdl_map.register_module_input('evaluation_matrix_v_'+key, val=evaluation_matrix_v, shape = evaluation_matrix_v.shape, computed_upstream=False)
+            evaluation_matrix_u_csdl = csdl_map.declare_variable('evaluation_matrix_u_'+key, val=evaluation_matrix_u, shape = evaluation_matrix_u.shape, computed_upstream=False)
+            evaluation_matrix_v_csdl = csdl_map.declare_variable('evaluation_matrix_v_'+key, val=evaluation_matrix_v, shape = evaluation_matrix_v.shape, computed_upstream=False)
 
             associated_u_function_values = csdl.matmat(evaluation_matrix_u_csdl, coefficients_csdl[key])
             associated_v_function_values = csdl.matmat(evaluation_matrix_v_csdl, coefficients_csdl[key])
@@ -774,8 +776,8 @@ class IndexedFunctionNormalEvaluation(ExplicitOperation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model  that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -841,8 +843,8 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
 
         Returns
         -------
-        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the model/operation outputs.
+        csdl_model : {csdl.Model}
+            The csdl model that computes the model/operation outputs.
         '''
         associated_coords = {}
         index = 0
@@ -857,10 +859,10 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
             index += 1
 
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
-        csdl_model = ModuleCSDL()
-        function_values = csdl_model.register_module_input('function_values', shape=self.arguments['function_values'].shape)
+        csdl_model = csdl.Model()
+        function_values = csdl_model.declare_variable('function_values', shape=self.arguments['function_values'].shape)
         function_values = csdl.reshape(function_values, output_shape)
-        csdl_model.register_module_output('test_function_values', function_values)
+        csdl_model.register_output('test_function_values', function_values)
         for key, value in associated_coords.items(): # in the future, use submodels from the function spaces?
             if hasattr(self.function.space.spaces[key], 'compute_fitting_map'):
                 fitting_matrix = self.function.space.spaces[key].compute_fitting_map(value[1])
@@ -872,13 +874,13 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
                     fitting_matrix = np.linalg.inv(evaluation_matrix.T@evaluation_matrix + self.regularization_coeff*np.eye(evaluation_matrix.shape[1]))@evaluation_matrix.T # tested with 1e-3
                 else:
                     fitting_matrix = linalg.pinv(evaluation_matrix)
-            fitting_matrix_csdl = csdl_model.register_module_input('fitting_matrix_'+key, val=fitting_matrix, shape = fitting_matrix.shape, computed_upstream=False)
+            fitting_matrix_csdl = csdl_model.declare_variable('fitting_matrix_'+key, val=fitting_matrix, shape = fitting_matrix.shape, computed_upstream=False)
             associated_function_values = csdl_model.create_output(name = key + '_fn_values', shape=(len(value[0]), output_shape[-1]))
             for i in range(len(value[0])):
                 associated_function_values[i,:] = function_values[value[0][i], :]
             coefficients = csdl.matmat(fitting_matrix_csdl, associated_function_values)
             coeff_name = self.function.coefficients[key].name
-            csdl_model.register_module_output(name = coeff_name, var = coefficients)
+            csdl_model.register_output(name = coeff_name, var = coefficients)
         
         return csdl_model
 
@@ -890,8 +892,8 @@ class IndexedFunctionInverseEvaluation(ExplicitOperation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
-            The csdl model or module that computes the derivatives of the model/operation outputs.
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model  that computes the derivatives of the model/operation outputs.
         '''
         pass
 
@@ -1100,6 +1102,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
             else:
                 if output.operation:
+                    print(output.name)
+                    print(output.operation.name)
                     name = f'{output.operation.name}_{output.name}'
                     self.outputs[name] = output
                 else:
@@ -1336,13 +1340,13 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     #     for output_name, output in self.outputs.items():
     #         self.gather_operations(output)
         
-    #     model_csdl = ModuleCSDL()
+    #     model_csdl = csdl.Model()
 
     #     for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
 
     #         if type(operation.operation_csdl) is csdl.Model:
     #             model_csdl.add(submodel=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
-    #         else: # type(operation.operation_csdl) is ModuleCSDL:
+    #         else: # type(operation.operation_csdl) is csdl.Model:
     #             model_csdl.add_module(submodule=operation.operation_csdl, name=operation.name, promotes=[]) # should I suppress promotions here?
             
 
@@ -1365,6 +1369,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # exit()
         # Assemble output states
         for output_name, output in self.outputs.items():
+            print('------------------------------------------', output_name)
             self.gather_operations(output)
         
         model_csdl = csdl.Model()
@@ -1376,8 +1381,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 operation_csdl = operation.compute()
                 if issubclass(type(operation_csdl), csdl.Model):
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(operation_csdl), ModuleCSDL):
-                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
 
@@ -1406,8 +1409,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 if issubclass(type(jacobian_csdl_model), csdl.Model):
                 # if type(jacobian_csdl_model) is csdl.Model:
                     model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
-                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
@@ -1559,7 +1560,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # Assemble output states
         for output_name, output in self.outputs.items():
             self.gather_operations_implicit(output)
-        # ODESystemModel = ModuleCSDL()
+        # ODESystemModel = csdl.Model()
         # ODESystemModel.parameters.declare('num_nodes')
         # n = ODESystemModel.parameters['num_nodes']
         n = num_times
@@ -1601,13 +1602,13 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         return RunModel
 
-    def assemble_modal(self) -> ModuleCSDL:
+    def assemble_modal(self) -> csdl.Model:
             # Assemble output states'output_jacobian_name'
         # Assemble output states
         for output_name, output in self.outputs.items():
             self.gather_operations(output)
         
-        model_csdl = ModuleCSDL()
+        model_csdl = csdl.Model()
         output_jacobian_names = []
         output_jacobian_vars = []
 
@@ -1617,8 +1618,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
                 if type(operation_csdl) is csdl.Model:
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(operation_csdl), ModuleCSDL):
-                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
@@ -1633,8 +1632,6 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 jacobian_csdl_model = operation.compute_derivatives()
                 if type(jacobian_csdl_model) is csdl.Model:
                     model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
-                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
@@ -1786,7 +1783,7 @@ class DynamicOperation(ExplicitOperation):
         return self.csdl_model
 
 
-class AssembledODEModel(ModuleCSDL):
+class AssembledODEModel(csdl.Model):
     def initialize(self):
         self.parameters.declare('num_nodes')
         self.parameters.declare('operations')
@@ -1800,8 +1797,6 @@ class AssembledODEModel(ModuleCSDL):
 
                 if type(operation_csdl) is csdl.Model:
                     self.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(operation_csdl), ModuleCSDL):
-                    self.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
@@ -1818,12 +1813,8 @@ class AssembledODEModel(ModuleCSDL):
                     promotions += [operation.residual_names[i][0], operation.residual_names[i][1]]
                 # if issubclass(type(operation_csdl), csdl.Model):
                 #     self.add(submodel=operation_csdl, name=operation_name, promotes=promotions)
-                # elif issubclass(type(operation_csdl), ModuleCSDL):
-                #     self.add_module(submodule=operation_csdl, name=operation_name, promotes=promotions)
                 if issubclass(type(operation_csdl), csdl.Model):
                     self.add(submodel=operation_csdl, name=operation_name)
-                elif issubclass(type(operation_csdl), ModuleCSDL):
-                    self.add_module(submodule=operation_csdl, name=operation_name)
                 else:
                     raise Exception(f"{operation.name}'s compute_residual() method is returning an invalid model type.")
 
@@ -1839,7 +1830,7 @@ class StructuralModalModel(Model):
         for output_name, output in self.outputs.items():
             self.gather_operations(output)
         
-        model_csdl = ModuleCSDL()
+        model_csdl = csdl.Model()
         output_jacobian_names = []
         output_jacobian_vars = []
 
@@ -1849,8 +1840,6 @@ class StructuralModalModel(Model):
 
                 if type(operation_csdl) is csdl.Model:
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(operation_csdl), ModuleCSDL):
-                    model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
@@ -1863,8 +1852,6 @@ class StructuralModalModel(Model):
                 jacobian_csdl_model = operation.compute_derivatives()
                 if type(jacobian_csdl_model) is csdl.Model:
                     model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
-                    model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
 
