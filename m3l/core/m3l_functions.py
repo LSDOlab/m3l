@@ -316,9 +316,9 @@ def variable_get_item(x:Variable, indices:np.ndarray):
     map = map.tocsc()
 
     if len(x.shape) == 1:
-        indexed_x = matvec(map=map, x=x)
+        indexed_x = matvec(map=map, x=x.copy())
     else:
-        indexed_x = matmat(map=map, x=x)
+        indexed_x = matmat(map=map, x=x.copy())
 
     # if len(x.shape) > 1:
     #     index_x = index_x_flat.reshape(original_shape)
