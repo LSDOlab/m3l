@@ -922,8 +922,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         Constructs a model group.
         '''
         self.models = {}
-        # self.operations = {}
-        self.operations = []
+        self.operations = {}
+        # self.operations = []
         self.outputs = {}
         self.parameters = None
         self.constraints = []
@@ -1195,7 +1195,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         self.objective = m3l_var
 
     # def gather_operations(self, variable:Variable):
-    #     print(self.depth)
+    #     # print(self.depth)
     #     self.depth += 1
     #     if variable:
     #         # print(variable)
@@ -1209,7 +1209,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
     #                 self.operations[operation.name] = operation
     #         else:
     #             pass
-                # print(f'Variable {variable.name} is not part of an operation')
+    #             print(f'Variable {variable.name} is not part of an operation')
     
     # def gather_operations(self, variable:Variable):
     #     print(self.depth)
@@ -1306,8 +1306,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                     operation = current_variable.operation
                     is_already_added = self.check_if_operation_has_been_added(operation)
 
-                    if not is_already_added:
-                        self.operations.append(operation)
+                    # if not is_already_added:
+                    if operation.name not in self.operations:
+                        self.operations[operation.name] = operation
 
                     for input_name, input in operation.arguments.items():
                         variable_is_already_added = self.check_if_variable_is_in_list(input, total_stack)
@@ -1315,7 +1316,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                             stack.append(input)
                             total_stack.append(input)
 
-        self.operations.reverse()
+        # self.operations.reverse()
 
 
     def gather_operations_implicit(self, variable:Variable):
@@ -1365,13 +1366,14 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         
         model_csdl = csdl.Model()
 
-        # for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-        for operation in self.operations:
+        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+        # for operation in self.operations:
             operation_name = operation.name
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
                 if issubclass(type(operation_csdl), csdl.Model):
-                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                    # print(operation_name)
+                    model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here-Yes?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
 
