@@ -597,15 +597,14 @@ class IndexedFunction:
         return function_values
 
     def evaluate_conservative(self, 
-                              fitting_matrix_key_list, 
-                              num_oml_output_points=None,
-                              num_oml_dual_variable_points=None,
-                              composition_mat=None,
-                              otherside_composed_mat=None, 
-                              solver_invariant_mat=None, 
-                              framework_invariant_mat=None) -> Variable:
+                              ordered_surface_key_list,
+                              otherside_composed_mat,
+                              solver_invariant_mat,
+                              framework_invariant_mat,
+                              output_name, 
+                              output_shape) -> Variable:
         '''
-        Construct evaluation map such that it conserves aeroelastic work.
+        Evaluate the function at a given set of nodal locations.
 
         Parameters
         ----------
@@ -616,6 +615,27 @@ class IndexedFunction:
         -------
         function_values : FunctionValues
             A variable representing the evaluated function values.
+        '''
+        function_evaluation_model = IndexedFunctionConservativeEvaluation(function=self, 
+                                                                            vector_surface_order=ordered_surface_key_list,
+                                                                            solver_invariant_mat=solver_invariant_mat,
+                                                                            framework_invariant_mat=framework_invariant_mat,
+                                                                        #    num_oml_output_points=num_oml_output_points,
+                                                                        #    num_oml_dual_variable_points=num_oml_dual_variable_points
+                                                                          )
+        # TODO: Make evaluate return the coefficient vector
+        function_values = function_evaluation_model.evaluate(otherside_composed_mat, output_name, output_shape)
+        return function_values
+
+    def inverse_evaluate_conservative(self, 
+                              ordered_surface_key_list,
+                              solver_input,
+                            #   composition_mat=None,
+                              otherside_composed_mat=None, 
+                              solver_invariant_mat=None, 
+                              framework_invariant_mat=None) -> Variable:
+        '''
+        Construct evaluation map such that it conserves aeroelastic work.
         '''
         # TODO: Compute projection matrix based on invariant matrices and other projection matrices, then distribute the
         # Compute projection matrix
@@ -647,17 +667,17 @@ class IndexedFunction:
         # # multiply projection matrix with flat coefficient matrix
         # output_vec = proj_mat@coefficients_vec_flat
 
-        # TODO: Add input argument that encodes the order of the surfaces, so we can match the right projection columns to the right surface coefficients
-
-        conservative_function_evaluation_model = IndexedFunctionConservativeEvaluation(function=self, 
-                                                                                       vector_surface_order=fitting_matrix_key_list,
+        conservative_function_evaluation_model = IndexedFunctionConservativeInverseEvaluation(function=self, 
+                                                                                       vector_surface_order=ordered_surface_key_list,
                                                                                        solver_invariant_mat=solver_invariant_mat,
                                                                                        framework_invariant_mat=framework_invariant_mat,
-                                                                                       num_oml_output_points=num_oml_output_points,
-                                                                                       num_oml_dual_variable_points=num_oml_dual_variable_points
+                                                                                    #    num_oml_output_points=num_oml_output_points,
+                                                                                    #    num_oml_dual_variable_points=num_oml_dual_variable_points
                                                                                        )
-        function_values = conservative_function_evaluation_model.evaluate(composition_mat, otherside_composed_mat)
-        return function_values
+        conservative_function_evaluation_model.evaluate(otherside_composed_mat, solver_input)
+        for key, value in self.coefficients.items():
+            value.operation = conservative_function_evaluation_model
+        return self.coefficients
     
     def inverse_evaluate(self, indexed_parametric_coordinates, function_values:Variable, regularization_coeff:float=None):
         '''
@@ -701,15 +721,14 @@ class IndexedFunction:
             evaluated_points[value[0],:] = evaluation_matrix.dot(coefficients[key].reshape((-1, coefficients[key].shape[-1])))
         return evaluated_points
 
-
 class IndexedFunctionConservativeEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
         self.parameters.declare('function', types=IndexedFunction)
         self.parameters.declare('vector_surface_order', types=list)
-        self.parameters.declare('solver_invariant_mat', types=sps.coo_matrix)
+        self.parameters.declare('solver_invariant_mat', types=sps.csr_matrix)
         self.parameters.declare('framework_invariant_mat', types=sps.coo_matrix)
-        self.parameters.declare('num_oml_output_points', types=int)
-        self.parameters.declare('num_oml_dual_variable_points', types=int)
+        # self.parameters.declare('num_oml_output_points', types=int)
+        # self.parameters.declare('num_oml_dual_variable_points', types=int)
 
     def assign_attributes(self):
         '''
@@ -719,8 +738,8 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         self.vector_surface_order = self.parameters['vector_surface_order']
         self.solver_invariant_mat = self.parameters['solver_invariant_mat']
         self.framework_invariant_mat = self.parameters['framework_invariant_mat']
-        self.num_oml_output_points = self.parameters['num_oml_output_points']
-        self.num_oml_dual_variable_points = self.parameters['num_oml_dual_variable_points']
+        # self.num_oml_output_points = self.parameters['num_oml_output_points']
+        # self.num_oml_dual_variable_points = self.parameters['num_oml_dual_variable_points']
 
     def compute(self):
         '''
@@ -733,49 +752,184 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         '''
         csdl_map = ModuleCSDL()
 
-        # TODO: Conditioning of `self.composition_mat` below is extremely poor (4.6e17) and breaks down the computations
-        #       This is likely because of the inverse distance weighting approach -- add a fix for this by removing extremely small numbers
-        incoming_projection_T_times_solver_mat = self.composition_mat.T@self.solver_invariant_mat
-        # repeat matrix along diagonal three times and compute pseudo-inverse
-        pinv_incoming_projection_T_times_solver_mat = np.linalg.pinv(sps.block_diag([incoming_projection_T_times_solver_mat]*3).toarray())
-        framework_mat_times_otherside_composition = self.framework_invariant_mat@self.otherside_composed_mat
-        framework_mat_times_otherside_composition_stacked = sps.block_diag([framework_mat_times_otherside_composition]*3)
+        pinv_solver_mat = np.linalg.pinv(self.solver_invariant_mat.toarray())
+        pinv_solver_mat_times_otherside_composition_T = pinv_solver_mat@self.otherside_composed_mat.T
 
-        # inv_term = incoming_projection_T_times_solver_mat@pinv_incoming_projection_T_times_solver_mat
-
-        # TODO: Matrix below could be made more sparse, by switching the inverse-distance weighting to a function with a compact support
         # construct the projection matrix itself
-        proj_mat_T = framework_mat_times_otherside_composition_stacked@pinv_incoming_projection_T_times_solver_mat
-        proj_mat = proj_mat_T.T
+        # NOTE: The factor 0.5 below accounts for the fact that the solid solver models only one wing instead of two
+        proj_mat = 0.5*pinv_solver_mat_times_otherside_composition_T@self.framework_invariant_mat
 
         proj_mat_csdl = csdl_map.register_module_input('conservative_projection_matrix', shape=proj_mat.shape,
                                                                     val=proj_mat)
 
-        # after having constructed the projection matrix we construct the vector that will contain the framework coefficients
+        # TODO: 
+        # solver_input_csdl = csdl_map.register_module_input(self.solver_input_name, shape=self.solver_input_shape)
+        # solver_input_csdl_reshaped = csdl.reshape(solver_input_csdl, solver_input_csdl.shape[1:])
+
+        coefficients_per_surf_list = []
+        # for surf_name in self.vector_surface_order:
+        #     # TODO: Figure out names of surf_coefficients below in summary graph and register them as module input
+        #     surf_coefficients = self.function.coefficients[surf_name]
+        #     coefficients_per_surf_list += [surf_coefficients]
         
-        coeff_arr_list = []
-        coefficients_cumsum_per_coordinate = [0]
+        total_coefficients = 0
         for surf_name in self.vector_surface_order:
-            coeff_arr = self.function.coefficients[surf_name]
-            coeff_arr_reshaped = coeff_arr.value.reshape((-1, coeff_arr.shape[-1]))
-            coeff_arr_reshaped_csdl = csdl_map.register_module_input(coeff_arr.name, shape=coeff_arr_reshaped.shape,
-                                                                    val=coeff_arr_reshaped)
-            coeff_arr_list += [coeff_arr_reshaped_csdl]
-            coefficients_cumsum_per_coordinate += [coefficients_cumsum_per_coordinate[-1] + coeff_arr_reshaped.shape[0]]
-        
-        # create CSDL array that contains all coefficients
-        coefficients_concatenated_csdl = csdl_map.create_output(name='inp_coefficients_concatenated',shape=(coefficients_cumsum_per_coordinate[-1], 3))
-        for i in range(len(coeff_arr_list)):
-            coefficients_concatenated_csdl[coefficients_cumsum_per_coordinate[i]:coefficients_cumsum_per_coordinate[i+1], :] = coeff_arr_list[i]
-        
-        # next we reshape the concatenated coefficient array by stacking its columns on top of one another
-        coefficients_concatenated_csdl_flat = csdl.reshape(coefficients_concatenated_csdl, (coefficients_cumsum_per_coordinate[-1]*3,))
+            surf_coefficients = self.function.coefficients[surf_name]
+            total_coefficients += surf_coefficients.shape[0]
+            # if surf_coefficients.value is None:
+            if surf_coefficients.value is None:
+                coefficients_per_surf_list += [csdl_map.register_module_input(surf_coefficients.name, shape=surf_coefficients.shape)]
+            else:
+                coefficients_per_surf_list += [csdl_map.register_module_input(surf_coefficients.name, shape=surf_coefficients.shape, val=surf_coefficients.value)]
+
+        concatenated_coefficients = csdl_map.create_output('framework_coefficients', shape=(total_coefficients, 3))
+
+        coefficients_idx_start = 0
+        for i in range(len(coefficients_per_surf_list)):
+            surf_coeffs = coefficients_per_surf_list[i]
+            concatenated_coefficients[coefficients_idx_start:(coefficients_idx_start+surf_coeffs.shape[0]), :] = surf_coeffs
+
+            coefficients_idx_start += surf_coeffs.shape[0]
+
+            # else:
+                # coefficients_csdl[key] = csdl_map.register_module_input(surf_coefficients.name, shape=(num_coefficients, coefficients.shape[-1]),
+                                                                    # val=coefficients.value.reshape((-1, coefficients.shape[-1])))
+
+        # TODO: Define concatenation csdl array as create_output()
+
+        # coefficient_array = np.vstack(coefficients_per_surf_list)
+        # framework_input_csdl = csdl_map.register_module_input('framework_coefficient_array', shape=coefficient_array.shape, val=coefficient_array)
 
         # Now we FINALLY multiply the projection matrix with the flattened coefficient array
-        output_oml_coefficients = csdl.matvec(proj_mat_csdl, coefficients_concatenated_csdl_flat)
-        output_oml_coefficients_reshaped = csdl.reshape(output_oml_coefficients, (self.num_oml_output_points, 3))
-        output_map = csdl_map.create_output(f'evaluated_{self.function.name}', shape=output_oml_coefficients_reshaped.shape)
-        output_map[:, :] = output_oml_coefficients_reshaped
+        output_coefficients = csdl.matmat(proj_mat_csdl, concatenated_coefficients)
+        csdl_map.register_module_output(self.output_name, output_coefficients)
+        return csdl_map
+    
+    def compute_derivates(self):
+        '''
+        -- optional --
+        Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
+        For now, I would recommend coming back to this.
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        pass
+
+    def evaluate(self, otherside_composed_mat, output_name, output_shape):
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        # TODO: Update this method to reflect the evaluate() function in the inverse_evaluate() super function that calls this class
+        self.name = f'{self.function.name}_evaluation'
+        self.output_name = output_name
+
+        # Define operation arguments
+        # surface_names = []
+        # for item in self.indexed_mesh:
+        #     name = item[0]
+        #     if not name in surface_names:
+        #         surface_names.append(name)
+
+        self.arguments = {}
+        coefficients = self.function.coefficients
+        for name in self.vector_surface_order:
+            self.arguments[coefficients[name].name] = coefficients[name]
+
+        # self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
+        # self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
+        # self.otherside_composed_mat_stacked = sps.block_diag([otherside_composed_mat]*3)
+        self.otherside_composed_mat = otherside_composed_mat
+        # self.solver_input_shape = solver_input.shape
+        # self.solver_input_name = solver_input.name
+
+        # Create the M3L variables that are being output
+        # output_shape = (self.num_oml_output_points, self.function.coefficients[self.vector_surface_order[0]].shape[-1])
+
+        shell_forces = Variable(name=output_name,
+                            shape=output_shape, operation=self)
+        return shell_forces
+
+class IndexedFunctionConservativeInverseEvaluation(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('function', types=IndexedFunction)
+        self.parameters.declare('vector_surface_order', types=list)
+        self.parameters.declare('solver_invariant_mat', types=sps.coo_matrix)
+        self.parameters.declare('framework_invariant_mat', types=sps.coo_matrix)
+        # self.parameters.declare('num_oml_output_points', types=int)
+        # self.parameters.declare('num_oml_dual_variable_points', types=int)
+
+    def assign_attributes(self):
+        '''
+        Assigns class attributes to make class more like standard python class.
+        '''
+        self.function = self.parameters['function']
+        self.vector_surface_order = self.parameters['vector_surface_order']
+        self.solver_invariant_mat = self.parameters['solver_invariant_mat']
+        self.framework_invariant_mat = self.parameters['framework_invariant_mat']
+        # self.num_oml_output_points = self.parameters['num_oml_output_points']
+        # self.num_oml_dual_variable_points = self.parameters['num_oml_dual_variable_points']
+
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the function evaluation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        csdl_map = ModuleCSDL()
+
+        pinv_framework_mat = np.linalg.pinv(self.framework_invariant_mat.toarray())
+        pinv_framework_mat_times_otherside_composition_T = pinv_framework_mat@self.otherside_composed_mat.T
+
+        # construct the projection matrix itself
+        proj_mat = pinv_framework_mat_times_otherside_composition_T@self.solver_invariant_mat
+
+        proj_mat_csdl = csdl_map.register_module_input('conservative_projection_matrix', shape=proj_mat.shape,
+                                                                    val=proj_mat)
+
+        solver_input_csdl = csdl_map.register_module_input(self.solver_input_name, shape=self.solver_input_shape)
+        solver_input_csdl_reshaped = csdl.reshape(solver_input_csdl, solver_input_csdl.shape[1:])
+
+
+        # solver_input_flat = solver_input_csdl.val.flatten(order='F')        
+        # solver_input_csdl_flat = csdl_map.create_output('solver_input_csdl_flat', shape=solver_input_flat.shape, val=solver_input_flat)
+        # solver_input_csdl_flat[:] = solver_input_flat
+        # solver_input_csdl_flat = csdl.reshape(solver_input_csdl, (np.prod(self.solver_input_shape),))
+
+        # Now we FINALLY multiply the projection matrix with the flattened coefficient array
+        output_coefficients = csdl.matmat(proj_mat_csdl, solver_input_csdl_reshaped)
+        # output_coefficients_reshaped = csdl.reshape(output_coefficients, (int(output_coefficients.shape[0]/3), 3))
+
+        # output_coefficients_reshaped = output_coefficients.val.reshape((int(output_coefficients.shape[0]/3), 3), order='F')
+
+        # output_coefficients_reshaped_csdl = csdl_map.create_output('output_coefficients_reshaped_csdl', shape=output_coefficients_reshaped.shape, val=output_coefficients_reshaped)
+
+        # TODO: Figure out why total forces are being conserved but not per force component
+        # TODO NEW: remove stacking everywhere here, component-wise projection should conserve energy as well since the stacked system is blockwise diagonal
+
+        # now that we have the output coefficients we have to transfer them to the various surfaces over which the framework function is defined
+        surf_start_idx = 0
+        for surf_name in self.vector_surface_order:
+            surf_coefficient_shape = self.function.coefficients[surf_name].shape
+            coefficients_to_be_assigned_to_surface = output_coefficients[surf_start_idx:(surf_start_idx + surf_coefficient_shape[0]), :]
+            csdl_map.register_module_output(name = self.function.coefficients[surf_name].name, var = coefficients_to_be_assigned_to_surface)
+
+            surf_start_idx += surf_coefficient_shape[0]
 
         return csdl_map
     
@@ -792,7 +946,7 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         '''
         pass
 
-    def evaluate(self, composition_mat, otherside_composed_mat):
+    def evaluate(self, otherside_composed_mat, solver_input):
         '''
         User-facing method that the user will call to define a model evaluation.
 
@@ -806,7 +960,8 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         function_values : Variable
             The values of the function at the mesh locations.
         '''
-        self.name = f'{self.function.name}_evaluation'
+        # TODO: Update this method to reflect the evaluate() function in the inverse_evaluate() super function that calls this class
+        self.name = f'{self.function.name}_inverse_evaluation'
 
         # Define operation arguments
         # surface_names = []
@@ -814,22 +969,23 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         #     name = item[0]
         #     if not name in surface_names:
         #         surface_names.append(name)
-        self.arguments = {}
-        coefficients = self.function.coefficients
-        for name in self.vector_surface_order:
-            self.arguments[coefficients[name].name] = coefficients[name]
-        self.arguments = self.function.coefficients
 
-        self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
-        self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
-        self.composition_mat = composition_mat
+        # TODO: Figure out whether this input gets updated in every iteration
+        self.arguments = {}
+        # self.arguments[solver_input.name] = solver_input
+
+        # self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
+        # self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
+        # self.otherside_composed_mat_stacked = sps.block_diag([otherside_composed_mat]*3)
         self.otherside_composed_mat = otherside_composed_mat
+        self.solver_input_shape = solver_input.shape
+        self.solver_input_name = solver_input.name
 
         # Create the M3L variables that are being output
-        output_shape = (self.num_oml_output_points, self.function.coefficients[self.vector_surface_order[0]].shape[-1])
+        # output_shape = (self.num_oml_output_points, self.function.coefficients[self.vector_surface_order[0]].shape[-1])
 
-        function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
-        return function_values
+        # function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
+        return #function_values
 
     # def compute(self):
     #     '''
