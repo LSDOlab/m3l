@@ -1284,10 +1284,8 @@ class DynamicModel(Model):
 
         if parameters is not None:  # do a register output and addemble model for each parameter that's a m3l var
             for parameter in parameters:
-                if parameter[1]:
-                    ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=parameter[2].shape)
-                else:
-                    ode_prob.add_parameter(parameter[0])
+                ode_prob.add_parameter(parameter[0], dynamic=parameter[1], shape=parameter[2].shape)
+                
         for i in range(len(residual_names)):
             ode_prob.add_state(residual_names[i][0], 
                                 residual_names[i][1],
