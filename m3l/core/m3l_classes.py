@@ -225,26 +225,17 @@ class Variable:
     def __setitem__(self, indices, value):
         import m3l
         new_me = m3l.variable_set_item(self, indices, value)
-        # self = new_me
-        # hello = False
-        
-        # if hello:
-        #     print('operation_before', self.operation.arguments['x2'].operation.arguments['x'].name)
-        #     self.name = new_me.name
-        #     print('operation_middle', self.operation.arguments['x2'].operation.arguments['x'].name)
-        #     self.operation = new_me.operation
-        #     print('operation_after', self.operation.arguments['x2'].operation.arguments['x'].name)
-        # else:
+
         self.name = new_me.name
         self.operation = new_me.operation
         self.value = new_me.value
 
     
     def __len__(self):
-        if self.operation is None:
-            print(self.name, self.shape)
-        else:
-            print(self.operation.name, self.name, self.shape)
+        # if self.operation is None:
+            # print(self.name, self.shape)
+        # else:
+            # print(self.operation.name, self.name, self.shape)
 
 
         return self.shape[0]
@@ -1369,7 +1360,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         # exit()
         # Assemble output states
         for output_name, output in self.outputs.items():
-            print('------------------------------------------', output_name)
+            # print('------------------------------------------', output_name)
             self.gather_operations(output)
         
         model_csdl = csdl.Model()
@@ -1472,14 +1463,15 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
             if issubclass(type(operation), ExplicitOperation):
-                operation_csdl = operation.compute()
-                if issubclass(type(operation_csdl), csdl.Model):
-                    derivative_model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
-                elif issubclass(type(operation_csdl), ModuleCSDL):
-                    derivative_model_csdl.add_module(submodule=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here?
+                derivative_operation_csdl = operation.compute_derivatives()
+                if derivative_operation_csdl is not None:
+                    if issubclass(type(derivative_operation_csdl), csdl.Model):
+                        derivative_model_csdl.add(submodel=derivative_operation_csdl, name=operation_name, promotes=[])
+                    else:
+                        raise Exception(f"{operation.name}'s compute_derivatives() method is returning an invalid model type : {type(derivative_operation_csdl)}.")
                 else:
-                    raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
-
+                    # Maybe if compute_derivatives is None, then assume it's linear?
+                    raise Exception(f"{operation.name}'s compute_derivatives() method is returning None. Please make sure to return a valid model.")
 
                 if not operation.arguments and 'connect_from' in operation.parameters:
                     for i in range(len(operation.parameters['connect_from'])):
