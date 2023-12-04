@@ -212,6 +212,7 @@ class Variable:
     upper : Union[int, float, np.ndarray, None] = None
     scaler : Union[int, float, None] = None
     equals : Union[int, float, np.ndarray, None] = None
+    description : str = None
 
     def __post_init__(self):
         if self.name is None:
@@ -1093,8 +1094,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
             else:
                 if output.operation:
-                    print(output.name)
-                    print(output.operation.name)
+                    # print(output.name)
+                    # print(output.operation.name)
                     name = f'{output.operation.name}_{output.name}'
                     self.outputs[name] = output
                 else:

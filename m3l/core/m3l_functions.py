@@ -2,14 +2,31 @@ import csdl
 from m3l.core.m3l_classes import Variable
 from m3l.core.m3l_standard_operations import *
 from typing import Union
+from copy import deepcopy
+
 
 def copy(x : Variable):
     """
     Performs a deep copy of an m3l variable
     """
+    # name = deepcopy(x.name)
+    # shape = deepcopy(x.shape)
+    # operation = deepcopy(x.operation)
+    # value = deepcopy(x.value)
+    # dv_flag =  deepcopy(x.dv_flag)
+    # lower =  deepcopy(x.lower)
+    # upper =  deepcopy(x.upper)
+    # scaler =  deepcopy(x.scaler)
+    # equals =  deepcopy(x.equals)
+
     copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
                         dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
                         equals=x.equals)
+
+    # copy_var = Variable(name=name, shape=shape, operation=operation, value=value,
+    #                     dv_flag=dv_flag, lower=lower, upper=upper, scaler=scaler,
+    #                     equals=equals)
+
     return copy_var
 
 def add(x1, x2):

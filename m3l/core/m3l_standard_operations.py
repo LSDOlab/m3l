@@ -335,10 +335,10 @@ class Power(ExplicitOperation):
         scalers = self.scalers
         arguments = self.arguments
 
-        x1 = arguments['x1']
-        x2 = scalers['x2']
+        x1 = arguments[f'{self.output_name}_x1']
+        x2 = scalers[f'{self.output_name}_x2']
         csdl_model = csdl.Model()
-        x1_csdl = csdl_model.declare_variable('x1', shape=x1.shape)
+        x1_csdl = csdl_model.declare_variable(f'{self.output_name}_x1', shape=x1.shape)
         y = x1_csdl**x2
 
         csdl_model.register_output(self.output_name, y)
@@ -357,13 +357,58 @@ class Power(ExplicitOperation):
         else:
             self.scalers = {}
             self.arguments = {}
-            self.scalers['x2'] = x2
-            self.arguments['x1'] = x1
-            
             output = Variable(shape=x1.shape, operation=self)
             self.output_name = output.name
+            
+            self.scalers[f'{self.output_name}_x2'] = x2
+            self.arguments[f'{self.output_name}_x1'] = x1
+            
+            
+
+            if x1.value is not None:
+                sim = Simulator(self.compute())
+                sim[f'{self.output_name}_x1'] = x1.value
+                sim.run()
+                output.value = sim[self.output_name]
 
             return output
+
+class Copy(ExplicitOperation):
+    def initialize(self, kwargs):
+        self.parameters.declare('name', default='subtraction_operation')
+
+    def assign_attributes(self):
+        random_name = generate_random_string(3)
+        self.name = f"{self.parameters['name']}_{random_name}"
+
+    def compute(self):
+        arguments = self.arguments
+
+        x = arguments[f'{self.output_name}_x']
+
+        csdl_model = csdl.Model()
+        x_csdl = csdl_model.declare_variable(f'{self.output_name}_x', shape=x.shape)
+
+        csdl_model.register_output(name=self.output_name, var=x_csdl*1)
+
+        return csdl_model
+
+    def evaluate(self, x : Variable):
+        self.arguments = {}
+        output = Variable(shape=x.shape, operation=self)
+        self.output_name = output.name
+        self.arguments[f'{self.output_name}_x'] = x
+
+        if x.value is not None:
+            operation_csdl = self.compute()
+            sim = Simulator(operation_csdl)
+            sim[f'{self.output_name}_x'] = x.value
+            sim.run()
+            output.value = sim[self.output_name]
+        
+        return output
+
+
 
 class Subtract(ExplicitOperation):
     def initialize(self, kwargs):
@@ -410,7 +455,7 @@ class Subtract(ExplicitOperation):
 
     def evaluate(self, x1 : Variable, x2 : Variable):
         random_name = generate_random_string()
-        if isinstance(x1, (float, int)):
+        if isinstance(x1, (float, int, np.ndarray)):
             self.name = f'scaler_minus_{x2.name}_operation_{random_name}'
             self.arguments = {}
             self.scalers = {}
@@ -430,7 +475,7 @@ class Subtract(ExplicitOperation):
                 sim.run()
                 output.value = sim[self.output_name]
 
-        elif isinstance(x2, (float, int)):
+        elif isinstance(x2, (float, int, np.ndarray)):
             self.name = f'{x1.name}_minus_scaler_operation_{random_name}'
             self.arguments = {}
             self.scalers = {}
@@ -594,7 +639,7 @@ class Multiplication(ExplicitOperation):
     
     def evaluate(self, x1 : Variable, x2 : Variable) -> Variable:
         random_name = generate_random_string()
-        if isinstance(x1, (float, int)):
+        if isinstance(x1, (float, int, np.ndarray)):
             self.name = f'scaler_times_{x2.name}_operation_{random_name}'
             
 
@@ -613,7 +658,7 @@ class Multiplication(ExplicitOperation):
             sim.run()
             output.value = sim[self.output_name]
 
-        elif isinstance(x2, (float, int)):
+        elif isinstance(x2, (float, int, np.ndarray)):
             self.name = f'{x1.name}_times_scaler_operation_{random_name}'
             
 
@@ -668,8 +713,8 @@ class Division(ExplicitOperation):
         csdl_model = csdl.Model()
         
         # NOTE: can't divide by integer or float right now
-        x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
-        x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape, val=x1.value)
+        x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape, val=x2.value)
 
         if x1.shape != x2.shape:
             if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
@@ -797,8 +842,10 @@ class Sum(ExplicitOperation):
 
         csdl_model = csdl.Model()
         x_csdl = csdl_model.declare_variable(name='x', shape=x.shape)
-
-        y = csdl.sum(x_csdl, axes=self.axes)
+        if len(self.axes) == len(x.shape):
+            y = csdl.sum(x_csdl)
+        else:
+            y = csdl.sum(x_csdl, axes=self.axes)
         csdl_model.register_output(name=self.output_name, var=y)
 
         return csdl_model

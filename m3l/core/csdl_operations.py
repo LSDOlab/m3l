@@ -48,28 +48,41 @@ class EigExplicit(csdl.CustomExplicitOperation):
     def compute(self, inputs, outputs):
 
         # Numpy eigenvalues
-        w, v = np.linalg.eig(inputs['A'])
-        outputs['e_real'] = np.real(w)
-        outputs['e_imag'] = np.imag(w)
+        eigenValues, eigenVectors = np.linalg.eig(inputs['A'])
+
+        idx = np.abs(eigenValues).argsort()[::-1]   
+        eigenValues = eigenValues[idx]
+        eigenVectors = eigenVectors[:,idx]
+
+
+        print('A', inputs['A'])
+        print('real', np.real(eigenValues))
+        print('imag', np.imag(eigenValues))
+
+        outputs['e_real'] = np.real(eigenValues)
+        outputs['e_imag'] = np.imag(eigenValues)
 
     def compute_derivatives(self, inputs, derivatives):
         size = self.parameters['size']
         shape = (size, size)
 
         # v are the eigenvectors in each columns
-        w, v = np.linalg.eig(inputs['A'])
-
+        eigenValues, eigenVectors = np.linalg.eig(inputs['A'])
+        idx = np.abs(eigenValues).argsort()[::-1]   
+        eigenValues = eigenValues[idx]
+        eigenVectors = eigenVectors[:,idx]
+        
         # v inverse transpose
-        v_inv_T = (np.linalg.inv(v)).T
+        v_inv_T = (np.linalg.inv(eigenVectors)).T
 
         # preallocate Jacobian: n outputs, n^2 inputs
         temp_r = np.zeros((size, size*size))
         temp_i = np.zeros((size, size*size))
 
-        for j in range(len(w)):
+        for j in range(len(eigenValues)):
 
             # dA/dw(j,:) = v(:,j)*(v^-T)(:j)
-            partial = np.outer(v[:, j], v_inv_T[:, j]).flatten(order='F')
+            partial = np.outer(eigenVectors[:, j], v_inv_T[:, j]).flatten(order='F')
             # Note that the order of flattening matters, hence argument in flatten()
 
             # Set jacobian rows
