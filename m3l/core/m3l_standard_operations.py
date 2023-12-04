@@ -20,16 +20,34 @@ class Norm(ExplicitOperation):
     def compute(self):
         order = self.order
         axes = self.axes
-        x = self.arguments[f'{self.output_name}_x']
+        x = self.arguments[f'x']
         
         csdl_model = csdl.Model()
-        x_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x', shape=x.shape)
+        x_csdl = csdl_model.declare_variable(name=f'x', shape=x.shape)
         if len(x.shape) == len(axes):
             y = csdl.pnorm(x_csdl, pnorm_type=order)
         else:
             y = csdl.pnorm(x_csdl, pnorm_type=order, axis=axes)
         csdl_model.register_output(name=self.output_name, var=y)
         return csdl_model
+    
+    def compute_derivatives(self): # Really this is compute 2nd derivatives 
+        norm_derivative_model = csdl.Model()
+        x_arg = self.arguments['x']
+        p = self.order
+        axes = self.axes
+        x = norm_derivative_model.declare_variable(f'x', shape=x_arg.shape)
+
+        if len(x.shape) == len(axes):
+            y = csdl.pnorm(x, pnorm_type=p)
+        else:
+            y = csdl.pnorm(x, pnorm_type=p, axis=axes)
+        y_expanded = csdl.expand(y, shape=x.shape, indices='i->ij')
+
+        # dx_norm_dx = x * ((x**2)**0.5)**(p-2) / y_expanded**(p-1)
+        dx_norm_dx = x/y_expanded
+        norm_derivative_model.register_output('d'+self.output_name+'_d'+'x', dx_norm_dx)
+        return norm_derivative_model
 
     def evaluate(self, x : Variable) -> Variable:
         axes = self.parameters['axes']
@@ -57,29 +75,19 @@ class Norm(ExplicitOperation):
             out_shape = (1, )
         norm = Variable(shape=out_shape, operation=self)
         self.output_name = norm.name
-        self.arguments = {f'{self.output_name}_x' : x}
+        self.arguments = {f'x' : x}
 
 
         # create csdl model for in-line evaluations
         if x.value is not None:
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x'] = x.value
+            sim[f'x'] = x.value
             sim.run()
             norm.value = sim[self.output_name]
 
         return norm
 
-
-    def compute_derivates(self): # Really this is compute 2nd derivatives 
-        norm_derivative_model = csdl.Model()
-        x_arg = self.arguments['x']
-        p = self.order
-        axes = self.axes
-        x = norm_derivative_model.declare_variable(f'{x_arg.name}', shape=x_arg.shape)
-
-        dx_norm_dx = x * ((x**2)**0.5)**(p-2) / csdl.pnorm(x, pnorm_type=p, axis=axes)**(p-1)
-        norm_derivative_model.register_output(f'{x_arg.name}_norm_derivative', dx_norm_dx)
 
 class Cos(ExplicitOperation):
     def initialize(self, kwargs):
@@ -239,19 +247,26 @@ class Dot(ExplicitOperation):
         self.name = self.parameters['name']
 
     def compute(self):
-        x1 = self.arguments[f'{self.output_name}_x1']
-        x2 = self.arguments[f'{self.output_name}_x2']
+        x1 = self.arguments[f'x1']
+        x2 = self.arguments[f'x2']
 
         axis = self.axis
 
         csdl_model = csdl.Model()
-        x1_csdl = csdl_model.declare_variable(f'{self.output_name}_x1', shape=x1.shape)
-        x2_csdl = csdl_model.declare_variable(f'{self.output_name}_x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(f'x1', shape=x1.shape)
+        x2_csdl = csdl_model.declare_variable(f'x2', shape=x2.shape)
 
         dot = csdl.dot(x1_csdl, x2_csdl, axis=axis)
         csdl_model.register_output(self.output_name, dot)
 
         return csdl_model
+    
+    def compute_derivates(self):
+        # TODO: Come back and implement this!
+        x1 = self.arguments['x1']
+        x2 = self.arguments['x2']
+
+        pass
     
     def evaluate(self, x1 : Variable, x2 : Variable, axis : int):
         self.name = f"{x1.name}_dot_{x2.name}_operation"
@@ -264,21 +279,19 @@ class Dot(ExplicitOperation):
         else:
             new_shape = (1, )
 
-        
-
         output = Variable(shape=new_shape, operation=self)
         self.output_name = output.name
         
         self.arguments = {
-            f'{self.output_name}_x1' : x1,
-            f'{self.output_name}_x2' : x2,
+            f'x1' : x1,
+            f'x2' : x2,
         }
         
         if (x1.value is not None) and (x2.value is not None):
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x1'] = x1.value
-            sim[f'{self.output_name}_x2'] = x2.value
+            sim[f'x1'] = x1.value
+            sim[f'x2'] = x2.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -741,7 +754,7 @@ class Reshape(ExplicitOperation):
         self.shape = shape
         x_reshaped = csdl.reshape(x_csdl, shape)
 
-        self.output_name = replace_periods_with_underscores( f'{x.name}_reshaped')
+        # self.output_name = replace_periods_with_underscores( f'{x.name}_reshaped')
         operation_csdl.register_output(name=self.output_name, var=x_reshaped)
         return operation_csdl
 
@@ -759,17 +772,24 @@ class Reshape(ExplicitOperation):
         output : Variable
             The reshaped variable.
         '''
-        self.name = f'{x.name}_reshape_operation'
+        random_string = generate_random_string()
+        self.name = f'{x.name}_reshape_operation_{random_string}'
+        if self.name == 'b_spline_hyper_volume_coefficients_reshape_operation':
+            print(x.name)
+            print(x.operation)
         self.parameters['name'] = self.name
 
         # Define operation arguments
         self.arguments = {'x' : x}
 
+        output = Variable(shape=self.shape, operation=self)
+        self.output_name = output.name
+
         operation_csdl = self.compute()
+        output.shape = self.shape
 
         # Create the M3L variables that are being output
         # output_name = replace_periods_with_underscores(f'{x.name}_reshaped')
-        output = Variable(name=self.output_name, shape=self.shape, operation=self)
         # self.output_name = output.name
 
         
