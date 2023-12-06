@@ -29,6 +29,8 @@ class Norm(ExplicitOperation):
         else:
             y = csdl.pnorm(x_csdl, pnorm_type=order, axis=axes)
         csdl_model.register_output(name=self.output_name, var=y)
+        self.csdl_model = csdl_model
+        self.sim = Simulator(csdl_model)
         return csdl_model
     
     def compute_derivatives(self): # Really this is compute 2nd derivatives 
@@ -47,6 +49,8 @@ class Norm(ExplicitOperation):
         # dx_norm_dx = x * ((x**2)**0.5)**(p-2) / y_expanded**(p-1)
         dx_norm_dx = x/y_expanded
         norm_derivative_model.register_output('d'+self.output_name+'_d'+'x', dx_norm_dx)
+        self.derivate_csdl_model = norm_derivative_model
+        self.derivative_sim = Simulator(norm_derivative_model)
         return norm_derivative_model
 
     def evaluate(self, x : Variable) -> Variable:
@@ -55,6 +59,7 @@ class Norm(ExplicitOperation):
 
         random_name = generate_random_string()
         self.name = f"norm_operation_{x.name}_{random_name}"
+        self.arguments = {f'x' : x}
 
         new_axes = []
         for axis in axes:
@@ -75,7 +80,6 @@ class Norm(ExplicitOperation):
             out_shape = (1, )
         norm = Variable(shape=out_shape, operation=self)
         self.output_name = norm.name
-        self.arguments = {f'x' : x}
 
 
         # create csdl model for in-line evaluations
@@ -111,12 +115,13 @@ class Cos(ExplicitOperation):
     def evaluate(self, x : Variable):
         self.name = f"{x.name}_cos_operation"
         
+        self.arguments = {
+            f'x' : x,
+        }
 
         output = Variable(shape=x.shape, operation=self)
         self.output_name = output.name
-        self.arguments = {
-            f'{self.output_name}_x' : x,
-        }
+        
 
         if x.value is not None:
             operation_csdl = self.compute()
@@ -172,10 +177,10 @@ class ArcCos(ExplicitOperation):
         self.name = self.parameters['name']
 
     def compute(self):
-        x = self.arguments[f'{self.output_name}_x']
+        x = self.arguments[f'x']
 
         csdl_model = csdl.Model()
-        x_csdl = csdl_model.declare_variable(f'{self.output_name}_x', shape=x.shape)
+        x_csdl = csdl_model.declare_variable(f'x', shape=x.shape)
 
         arccos_output = csdl.arccos(x_csdl)
 
@@ -189,13 +194,13 @@ class ArcCos(ExplicitOperation):
         output = Variable(shape=x.shape, operation=self)
         self.output_name = output.name
         self.arguments = {
-            f'{self.output_name}_x' : x,
+            f'x' : x,
         }
 
         if x.value is not None:
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x'] = x.value
+            sim[f'x'] = x.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -308,10 +313,10 @@ class Expand(ExplicitOperation):
         self.indices = self.parameters['indices']
 
     def compute(self):
-        x = self.arguments[f'{self.output_name}_x']
+        x = self.arguments[f'x']
 
         csdl_model = csdl.Model()
-        x_csdl = csdl_model.declare_variable(f'{self.output_name}_x', shape=x.shape)
+        x_csdl = csdl_model.declare_variable(f'x', shape=x.shape)
         x_csdl_expanded = csdl.expand(x_csdl, shape=self.new_shape, indices=self.indices)
 
         csdl_model.register_output(self.output_name, x_csdl_expanded)
@@ -324,13 +329,13 @@ class Expand(ExplicitOperation):
 
         output = Variable(shape=self.new_shape, operation=self)
         self.output_name = output.name
-        self.arguments = {f'{self.output_name}_x' : x}
+        self.arguments = {f'x' : x}
 
 
         if x.value is not None:
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x'] = x.value
+            sim[f'x'] = x.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -389,30 +394,30 @@ class Subtract(ExplicitOperation):
         scalers = self.scalers
         arguments = self.arguments
 
-        if f'{self.output_name}_x1' in scalers:
-            x1 = scalers[f'{self.output_name}_x1']
-            x2 = arguments[f'{self.output_name}_x2']
+        if f'x1' in scalers:
+            x1 = scalers[f'x1']
+            x2 = arguments[f'x2']
             csdl_model = csdl.Model()
-            x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+            x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
             y = x1 - x2_csdl
 
             csdl_model.register_output(name=self.output_name, var=y)
 
-        elif f'{self.output_name}_x2' in scalers:
-            x1 = arguments[f'{self.output_name}_x1']
-            x2 = scalers[f'{self.output_name}_x2']
+        elif f'x2' in scalers:
+            x1 = arguments[f'x1']
+            x2 = scalers[f'x2']
             csdl_model = csdl.Model()
-            x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
+            x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
             y = x1_csdl - x2
 
             csdl_model.register_output(name=self.output_name, var=y)
         else:
-            x1 = self.arguments[f'{self.output_name}_x1']
-            x2 = self.arguments[f'{self.output_name}_x2']
+            x1 = self.arguments[f'x1']
+            x2 = self.arguments[f'x2']
 
             csdl_model = csdl.Model()
-            x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
-            x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+            x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
+            x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
 
             y = x1_csdl - x2_csdl
             csdl_model.register_output(name=self.output_name, var=y)
@@ -431,15 +436,15 @@ class Subtract(ExplicitOperation):
 
             output = Variable(shape=x2.shape, operation=self)
             self.output_name = output.name
-            self.scalers[f'{self.output_name}_x1'] = x1
-            self.arguments[f'{self.output_name}_x2'] = x2
+            self.scalers[f'x1'] = x1
+            self.arguments[f'x2'] = x2
             
             # NOTE: in-line evaluations only work if all solver developers implement them
             # create csdl model for in-line evaluations
             if x2.value is not None:
                 operation_csdl = self.compute()
                 sim = Simulator(operation_csdl)
-                sim[f'{self.output_name}_x2'] = x2.value
+                sim[f'x2'] = x2.value
                 sim.run()
                 output.value = sim[self.output_name]
 
@@ -451,14 +456,14 @@ class Subtract(ExplicitOperation):
 
             output = Variable(shape=x1.shape, operation=self)
             self.output_name = output.name
-            self.scalers[f'{self.output_name}_x2'] = x2
-            self.arguments[f'{self.output_name}_x1'] = x1
+            self.scalers[f'x2'] = x2
+            self.arguments[f'x1'] = x1
 
             # create csdl model for in-line evaluations
             if x1.value is not None:
                 operation_csdl = self.compute()
                 sim = Simulator(operation_csdl)
-                sim[f'{self.output_name}_x1'] = x1.value
+                sim[f'x1'] = x1.value
                 sim.run()
                 output.value = sim[self.output_name]
         
@@ -470,15 +475,15 @@ class Subtract(ExplicitOperation):
 
             output = Variable(shape=x1.shape, operation=self)
             self.output_name = output.name
-            self.arguments[f'{self.output_name}_x1'] = x1
-            self.arguments[f'{self.output_name}_x2'] = x2
+            self.arguments[f'x1'] = x1
+            self.arguments[f'x2'] = x2
 
             # create csdl model for in-line evaluations
             if (x1.value is not None) and (x2.value is not None):
                 operation_csdl = self.compute()
                 sim = Simulator(operation_csdl)
-                sim[f'{self.output_name}_x1'] = x1.value
-                sim[f'{self.output_name}_x2'] = x2.value
+                sim[f'x1'] = x1.value
+                sim[f'x2'] = x2.value
                 sim.run()
                 output.value = sim[self.output_name]
 
@@ -502,12 +507,12 @@ class Add(ExplicitOperation):
         csdl_model : {csdl.Model}
             The csdl model or module that computes the model/operation outputs.
         '''
-        x1 = self.arguments[f'{self.output_name}_x1']
-        x2 = self.arguments[f'{self.output_name}_x2']
+        x1 = self.arguments[f'x1']
+        x2 = self.arguments[f'x2']
 
         csdl_model = csdl.Model()
-        x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
-        x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
+        x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
 
         y = x1_csdl + x2_csdl
         csdl_model.register_output(name=self.output_name, var=y)
@@ -542,6 +547,7 @@ class Add(ExplicitOperation):
         '''
         self.name = f'{x1.name}_plus_{x2.name}_operation'
         self.parameters['name'] = self.name
+        self.arguments = {f'x1' : x1, f'x2' : x2}
         # self.x1 = x1
         # self.x2 = x2
 
@@ -551,13 +557,12 @@ class Add(ExplicitOperation):
         output = Variable(shape=x1.shape, operation=self)
         self.output_name = output.name
         # Define operation arguments
-        self.arguments = {f'{self.output_name}_x1' : x1, f'{self.output_name}_x2' : x2}
         # create csdl model for in-line evaluations
         if (x1.value is not None) and (x2.value is not None):
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x1'] = x1.value
-            sim[f'{self.output_name}_x2'] = x2.value
+            sim[f'x1'] = x1.value
+            sim[f'x2'] = x2.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -575,30 +580,30 @@ class Multiplication(ExplicitOperation):
         scalers = self.scalers
         arguments = self.arguments
 
-        if f'{self.output_name}_x1' in scalers:
-            x1 = scalers[f'{self.output_name}_x1']
-            x2 = arguments[f'{self.output_name}_x2']
+        if f'x1' in scalers:
+            x1 = scalers[f'x1']
+            x2 = arguments[f'x2']
             csdl_model = csdl.Model()
-            x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+            x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
             y = x1 * x2_csdl
 
             csdl_model.register_output(name=self.output_name, var=y)
 
-        elif f'{self.output_name}_x2' in scalers:
-            x1 = arguments[f'{self.output_name}_x1']
-            x2 = scalers[f'{self.output_name}_x2']
+        elif f'x2' in scalers:
+            x1 = arguments[f'x1']
+            x2 = scalers[f'x2']
             csdl_model = csdl.Model()
-            x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
+            x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
             y = x1_csdl * x2
 
             csdl_model.register_output(name=self.output_name, var=y)
         else:
-            x1 = self.arguments[f'{self.output_name}_x1']
-            x2 = self.arguments[f'{self.output_name}_x2']
+            x1 = self.arguments[f'x1']
+            x2 = self.arguments[f'x2']
 
             csdl_model = csdl.Model()
-            x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
-            x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+            x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
+            x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
 
             y = x1_csdl * x2_csdl
             csdl_model.register_output(name=self.output_name, var=y)
@@ -615,14 +620,14 @@ class Multiplication(ExplicitOperation):
             self.output_name = output.name
             self.arguments = {}
             self.scalers = {}
-            self.scalers[f'{self.output_name}_x1'] = x1
-            self.arguments[f'{self.output_name}_x2'] = x2
+            self.scalers[f'x1'] = x1
+            self.arguments[f'x2'] = x2
 
             # NOTE: in-line evaluations only work if all solver developers implement them
             # create csdl model for in-line evaluations
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x2'] = x2.value
+            sim[f'x2'] = x2.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -635,13 +640,13 @@ class Multiplication(ExplicitOperation):
             
             self.arguments = {}
             self.scalers = {}
-            self.scalers[f'{self.output_name}_x2'] = x2
-            self.arguments[f'{self.output_name}_x1'] = x1
+            self.scalers[f'x2'] = x2
+            self.arguments[f'x1'] = x1
 
             # create csdl model for in-line evaluations
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x1'] = x1.value
+            sim[f'x1'] = x1.value
             sim.run()
             output.value = sim[self.output_name]
         
@@ -653,14 +658,14 @@ class Multiplication(ExplicitOperation):
 
             self.arguments = {}
             self.scalers = {}
-            self.arguments[f'{self.output_name}_x1'] = x1
-            self.arguments[f'{self.output_name}_x2'] = x2
+            self.arguments[f'x1'] = x1
+            self.arguments[f'x2'] = x2
 
             # create csdl model for in-line evaluations
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x1'] = x1.value
-            sim[f'{self.output_name}_x2'] = x2.value
+            sim[f'x1'] = x1.value
+            sim[f'x2'] = x2.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -675,14 +680,14 @@ class Division(ExplicitOperation):
 
 
     def compute(self):
-        x1 = self.arguments[f'{self.output_name}_x1']
-        x2 = self.arguments[f'{self.output_name}_x2']
+        x1 = self.arguments[f'x1']
+        x2 = self.arguments[f'x2']
 
         csdl_model = csdl.Model()
         
         # NOTE: can't divide by integer or float right now
-        x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
-        x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
+        x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
 
         if x1.shape != x2.shape:
             if (x1.shape != (1, ) or x1.shape != (1, 1)) and (x2.shape == (1, ) or x2.shape == (1, 1)):
@@ -700,18 +705,18 @@ class Division(ExplicitOperation):
     def evaluate(self, x1 : Variable, x2 : Variable) -> Variable:
         self.name = f'{x1.name}_division_{x2.name}_operation'
         # Define operation arguments
+        self.arguments = {f'x1' : x1, f'x2' : x2}
 
         # Create the M3L variables that are being output
         output = Variable(shape=x1.shape, operation=self)
         self.output_name = output.name
-        self.arguments = {f'{self.output_name}_x1' : x1, f'{self.output_name}_x2' : x2}
 
         if (x1.value is not None) and (x2.value is not None):
             # create csdl model for in-line evaluations
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'{self.output_name}_x1'] = x1.value
-            sim[f'{self.output_name}_x2'] = x2.value
+            sim[f'x1'] = x1.value
+            sim[f'x2'] = x2.value
             sim.run()
             output.value = sim[self.output_name]
         return output
@@ -858,12 +863,12 @@ class CrossProduct(ExplicitOperation):
         self.axis = self.parameters['axis']
 
     def compute(self):
-        x1 = self.arguments[f'{self.output_name}_x1']
-        x2 = self.arguments[f'{self.output_name}_x2']
+        x1 = self.arguments[f'x1']
+        x2 = self.arguments[f'x2']
 
         csdl_model = csdl.Model()
-        x1_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x1', shape=x1.shape)
-        x2_csdl = csdl_model.declare_variable(name=f'{self.output_name}_x2', shape=x2.shape)
+        x1_csdl = csdl_model.declare_variable(name=f'x1', shape=x1.shape)
+        x2_csdl = csdl_model.declare_variable(name=f'x2', shape=x2.shape)
 
         y = csdl.cross(x1_csdl, x2_csdl, axis=self.axis)
         csdl_model.register_output(name=self.output_name, var=y)
@@ -875,13 +880,13 @@ class CrossProduct(ExplicitOperation):
 
         output = Variable(shape=x1.shape, operation=self)
         self.output_name = output.name
-        self.arguments = {f'{self.output_name}_x1': x1, f'{self.output_name}_x2' : x2}
+        self.arguments = {f'x1': x1, f'x2' : x2}
 
         # create csdl model for in-line evaluations
         operation_csdl = self.compute()
         sim = Simulator(operation_csdl)
-        sim[f'{self.output_name}_x1'] = x1.value
-        sim[f'{self.output_name}_x2'] = x2.value
+        sim[f'x1'] = x1.value
+        sim[f'x2'] = x2.value
         sim.run()
         output.value = sim[self.output_name]
         
@@ -1256,21 +1261,25 @@ class Rotate(ExplicitOperation):
 
         if type(points) is np.ndarray:
             points_name = 'constant_points'
-            points = m3l.Variable(name=points_name, shape=points.shape, operation=None, value=points)
+            # points = m3l.Variable(name=points_name, shape=points.shape, operation=None, value=points)
+            points = m3l.Variable(shape=points.shape, operation=None, value=points)
 
         if type(axis_origin) is np.ndarray:
             axis_origin_name = 'constant_axis_origin'
-            axis_origin = m3l.Variable(name=axis_origin_name, shape=axis_origin.shape, operation=None, value=axis_origin)
+            # axis_origin = m3l.Variable(name=axis_origin_name, shape=axis_origin.shape, operation=None, value=axis_origin)
+            axis_origin = m3l.Variable(shape=axis_origin.shape, operation=None, value=axis_origin)
         
         if type(axis_vector) is np.ndarray:
             axis_vector_name = 'constant_axis_vector'
-            axis_vector = m3l.Variable(name=axis_vector_name, shape=axis_vector.shape, operation=None, value=axis_vector)
+            # axis_vector = m3l.Variable(name=axis_vector_name, shape=axis_vector.shape, operation=None, value=axis_vector)
+            axis_vector = m3l.Variable(shape=axis_vector.shape, operation=None, value=axis_vector)
 
         if type(angles) is float or type(angles) is int:
             angles = m3l.Variable(name='constant_angle', shape=(1,), operation=None, value=angles)
         elif type(angles) is np.ndarray:
             angles_name = 'constant_angles'
-            angles = m3l.Variable(name=angles_name, shape=angles.shape, operation=None, value=angles)
+            # angles = m3l.Variable(name=angles_name, shape=angles.shape, operation=None, value=angles)
+            angles = m3l.Variable(shape=angles.shape, operation=None, value=angles)
         
         self.name = f'{points.name}_rotated_by_{angles.name}_about_{axis_vector.name}_at_point_{axis_origin.name}_operation'
 
