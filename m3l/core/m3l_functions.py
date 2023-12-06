@@ -10,6 +10,9 @@ def copy(x : Variable):
     copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
                         dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
                         equals=x.equals)
+    # copy_var = Variable(shape=x.shape, operation=x.operation, value=x.value,
+    #                     dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
+    #                     equals=x.equals)  # Threw an error.
     return copy_var
 
 def add(x1, x2):
@@ -309,9 +312,11 @@ def variable_get_item(x:Variable, indices:np.ndarray):
 
     map_num_outputs = indices.shape[0]
     map_num_inputs = x.shape[0]
-    map = sps.lil_matrix((map_num_outputs, map_num_inputs))
-    for i in range(map_num_outputs):
-        map[i, indices[i]] = 1
+    # map = sps.lil_matrix((map_num_outputs, map_num_inputs))
+    # for i in range(map_num_outputs):
+    #     map[i, indices[i]] = 1
+    map = sps.coo_matrix((np.ones((map_num_outputs,)), (np.arange(map_num_outputs), indices)),
+                            shape=(map_num_outputs, map_num_inputs))
 
     map = map.tocsc()
 
@@ -343,10 +348,12 @@ def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
     # updated component
     map_num_outputs = x.shape[0]
     map_num_inputs = indices.shape[0]
-    map = sps.lil_matrix((map_num_outputs, map_num_inputs))
-    for i in range(indices.shape[0]):
-        index = indices[i]
-        map[index, i] = 1
+    # map = sps.lil_matrix((map_num_outputs, map_num_inputs))
+    # for i in range(indices.shape[0]):
+    #     index = indices[i]
+    #     map[index, i] = 1
+    map = sps.coo_matrix((np.ones((map_num_inputs,)), (indices, np.arange(map_num_inputs))),
+                            shape=(map_num_outputs, map_num_inputs))
     map = map.tocsc()
     x_updated = matvec(map=map, x=value)
 
