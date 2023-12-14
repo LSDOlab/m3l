@@ -578,6 +578,18 @@ class IndexedFunction:
     def __call__(self, mesh : am.MappedArray) -> Variable:
         return self.evaluate(mesh)
 
+    # def reflect_on_oml(self, 
+    #                    source_indexed_physical_coordinates,
+    #                    target_indexed_physical_coordinates,
+    #                    left_wing_oml_displacements,
+    #                    RBF_eps=5.):
+
+    #     function_oml_reflection_model = OMLPointsFromReflection(source_indexed_physical_coordinates=source_indexed_physical_coordinates, 
+    #                                                             target_indexed_physical_coordinates=target_indexed_physical_coordinates,
+    #                                                             RBF_eps=RBF_eps)
+    #     function_oml_values = function_oml_reflection_model.evaluate(left_wing_oml_displacements)
+    #     return function_oml_values
+
     def evaluate(self, indexed_parametric_coordinates) -> Variable:
         '''
         Evaluate the function at a given set of nodal locations.
@@ -752,12 +764,12 @@ class IndexedFunctionConservativeEvaluation(ExplicitOperation):
         '''
         csdl_map = ModuleCSDL()
 
-        pinv_solver_mat = np.linalg.pinv(self.solver_invariant_mat.toarray())
-        pinv_solver_mat_times_otherside_composition_T = pinv_solver_mat@self.otherside_composed_mat.T
+        # pinv_solver_mat = np.linalg.pinv(self.solver_invariant_mat.toarray())
+        inv_solver_mat = np.linalg.inv(self.solver_invariant_mat.toarray())
+        inv_solver_mat_times_otherside_composition_T = inv_solver_mat@self.otherside_composed_mat.T
 
         # construct the projection matrix itself
-        # NOTE: The factor 0.5 below accounts for the fact that the solid solver models only one wing instead of two
-        proj_mat = 0.5*pinv_solver_mat_times_otherside_composition_T@self.framework_invariant_mat
+        proj_mat = inv_solver_mat_times_otherside_composition_T@self.framework_invariant_mat
 
         proj_mat_csdl = csdl_map.register_module_input('conservative_projection_matrix', shape=proj_mat.shape,
                                                                     val=proj_mat)
@@ -972,7 +984,7 @@ class IndexedFunctionConservativeInverseEvaluation(ExplicitOperation):
 
         # TODO: Figure out whether this input gets updated in every iteration
         self.arguments = {}
-        # self.arguments[solver_input.name] = solver_input
+        self.arguments[solver_input.name] = solver_input
 
         # self.solver_invariant_mat_stacked = sps.block_diag([self.solver_invariant_mat]*3)
         # self.framework_invariant_mat_stacked = sps.block_diag([self.framework_invariant_mat]*3)
@@ -1262,8 +1274,7 @@ class IndexedFunctionEvaluation(ExplicitOperation):
         output_shape = (len(self.indexed_mesh), self.function.coefficients[self.indexed_mesh[0][0]].shape[-1])
 
         function_values = Variable(name=f'evaluated_{self.function.name}', shape=output_shape, operation=self)
-        return function_values
-    
+        return function_values  
 
 class IndexedFunctionNormalEvaluation(ExplicitOperation):
     def initialize(self, kwargs):
