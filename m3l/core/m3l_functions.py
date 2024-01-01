@@ -374,3 +374,141 @@ def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
     #     index_x = index_x_flat
 
     return new_x
+
+def check_if_variable_is_upstream(variable:Variable, upstream_variable:Variable):
+    """
+    Checks if a variable is an upstream variable
+    """
+    from collections import deque
+    total_stack = []
+    stack = deque([variable])
+
+    while stack:
+        current_variable = stack.popleft()
+
+        if current_variable.operation is not None:
+            operation = current_variable.operation
+
+            for input_name, input in operation.arguments.items():
+                if input is upstream_variable:
+                    return True
+
+                is_variable_in_stack = check_if_variable_is_in_list(variable=input, variable_list=stack)
+                if not is_variable_in_stack:
+                    stack.append(input)
+                    total_stack.append(input)
+    return False
+
+
+def check_if_variable_is_in_list(variable:Variable, variable_list:list):
+    """
+    Checks if a variable is in a list of variables
+    """
+    for variable_in_list in variable_list:
+        if variable is variable_in_list:
+            return True
+
+    return False
+
+
+# def compute_mapping_from_upstream_variable(variable:Variable, upstream_variable:Variable, current_map=None):
+#     """
+#     Computes the mapping from an upstream variable to a downstream variable
+#     """
+#     maps_to_add = []
+#     for input_name, input in variable.operation.arguments.items():
+#         is_state_upstream_of_this_variable = check_if_variable_is_upstream(variable=input, upstream_variable=upstream_variable)
+#         if is_state_upstream_of_this_variable:
+#             if current_map is None:
+#                 current_map = sps.eye(input.shape[0])
+#             else:
+#                 current_map = current_map.copy()
+
+#             if input.operation is not None:
+#                 if type(input.operation) is MatVec:
+#                     input_map = input.operation.map
+#                     current_map = current_map.dot(input_map)
+#                     maps_to_add.append(input_map)
+#                 elif type(input.operation) is Add:
+#                     maps_to_add.append(input.operation.map)
+
+#                 input_map = input.operation.map
+#                 current_map = current_map.dot(input_map)
+#                 maps_to_stack.append(input_map)
+#         else:
+#             continue
+
+def compute_mapping_from_upstream_variable(variable:Variable, upstream_variable:Variable):
+    from m3l.core.m3l_standard_operations import MatVec
+    from m3l.core.m3l_standard_operations import Add
+    from m3l.core.m3l_standard_operations import Subtract
+    from m3l.core.m3l_standard_operations import Multiplication
+    from m3l.core.m3l_standard_operations import Division
+
+    current_map = None
+
+    # if variable is upstream_variable:
+    if variable == upstream_variable:
+        return sps.eye(variable.shape[0])
+
+    if variable.operation is not None:
+        operation = variable.operation
+        # input_upstream_maps = []
+        if type(operation) is MatVec:
+            upstream_map = compute_mapping_from_upstream_variable(operation.arguments['x'], upstream_variable)
+            if upstream_map is None:
+                return None
+            current_map = operation.map.dot(upstream_map)
+        elif type(operation) is Add:
+            current_map = None
+            for input_name, input in operation.arguments.items():
+                upstream_map = compute_mapping_from_upstream_variable(input, upstream_variable)
+                if upstream_map is None:
+                    continue
+                if current_map is None:
+                    current_map = upstream_map
+                else:
+                    current_map += upstream_map
+        elif type(operation) is Subtract:
+            current_map = None
+            counter = 0
+            for input_name, input in operation.arguments.items():
+                upstream_map = compute_mapping_from_upstream_variable(input, upstream_variable)
+                if upstream_map is None:
+                    counter += 1
+                    continue
+                if current_map is None:
+                    if counter == 0:
+                        current_map = upstream_map
+                    else:   # counter = 1
+                        current_map = -upstream_map
+                else:
+                    current_map -= upstream_map  # The second argument is always the subtracted one!
+                counter += 1
+        elif type(operation) is Multiplication:
+            upstream_map = compute_mapping_from_upstream_variable(operation.arguments['x1'], upstream_variable)
+            if upstream_map is None:
+                return None
+            for input_name, input in operation.arguments.items():
+                if input.operation is None:
+                    constant_term = input.value
+                else:
+                    upstream_map = compute_mapping_from_upstream_variable(input, upstream_variable)
+            current_map = upstream_map * constant_term
+        elif type(operation) is Division:
+            upstream_map = compute_mapping_from_upstream_variable(operation.arguments['x1'], upstream_variable)
+            if upstream_map is None:
+                return None
+            for input_name, input in operation.arguments.items():
+                if input.operation is None:
+                    constant_term = input.value
+                else:
+                    upstream_map = compute_mapping_from_upstream_variable(input, upstream_variable)
+            current_map = upstream_map / constant_term
+        else:
+            return None
+            # raise Exception(f'The manually computed maps for the parameterization solver does not support graphs with operation type: {type(operation)}')
+    else:
+        return None
+
+    return current_map

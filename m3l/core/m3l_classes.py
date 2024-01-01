@@ -9,7 +9,7 @@ from scipy import linalg
 import csdl
 from typing import Union
 from m3l.utils.base_class import OperationBase
-from ozone.api import ODEProblem
+# from ozone.api import ODEProblem
 
 from m3l.core.csdl_operations import Eig, EigExplicit
 
@@ -218,6 +218,12 @@ class Variable:
             self.name = f'{Variable.variable_counter}'
         Variable.variable_counter += 1
 
+        self.copy_before_use = False
+        if self.operation is not None:
+            for argument_name, argument in self.operation.arguments.items():
+                if argument.copy_before_use:
+                    self.operation.arguments[argument_name] = argument.copy()
+
     def __getitem__(self, indices):
         import m3l
         return m3l.variable_get_item(self, indices)
@@ -229,6 +235,8 @@ class Variable:
         self.name = new_me.name
         self.operation = new_me.operation
         self.value = new_me.value
+
+        self.copy_before_use = True
 
     
     def __len__(self):
@@ -1301,20 +1309,27 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         while stack:
             current_variable = stack.popleft()
 
-            if current_variable:
-                if current_variable.operation is not None:
-                    operation = current_variable.operation
-                    is_already_added = self.check_if_operation_has_been_added(operation)
+            if current_variable.operation is not None:
+                operation = current_variable.operation
+                is_already_added = self.check_if_operation_has_been_added(operation)
 
-                    # if not is_already_added:
-                    if operation.name not in self.operations:
-                        self.operations[operation.name] = operation
+                # if not is_already_added:
+                if operation.name not in self.operations:
+                    self.operations[operation.name] = operation
+                # else:
+                #     print('------------------start------------------------')
+                #     print(is_already_added)
+                #     print(current_variable.name)
+                #     print(operation)
+                #     print(operation.name)
+                #     print(operation.arguments)
+                #     print('-------------------end----------------------')
 
-                    for input_name, input in operation.arguments.items():
-                        variable_is_already_added = self.check_if_variable_is_in_list(input, total_stack)
-                        if not variable_is_already_added:
-                            stack.append(input)
-                            total_stack.append(input)
+                for input_name, input in operation.arguments.items():
+                    variable_is_already_added = self.check_if_variable_is_in_list(input, total_stack)
+                    if not variable_is_already_added:
+                        stack.append(input)
+                        total_stack.append(input)
 
         # self.operations.reverse()
 
@@ -1367,7 +1382,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         model_csdl = csdl.Model()
 
         for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-        # for operation in self.operations:
+            # for operation in self.operations:
             operation_name = operation.name
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
