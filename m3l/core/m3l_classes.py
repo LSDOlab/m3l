@@ -930,8 +930,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         Constructs a model group.
         '''
         self.models = {}
-        self.operations = {}
-        # self.operations = []
+        # self.operations = {}
+        self.operations = []
         self.outputs = {}
         self.parameters = None
         self.constraints = []
@@ -1313,9 +1313,18 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                 operation = current_variable.operation
                 is_already_added = self.check_if_operation_has_been_added(operation)
 
-                # if not is_already_added:
-                if operation.name not in self.operations:
-                    self.operations[operation.name] = operation
+                if not is_already_added:
+                # if operation.name not in self.operations:
+                    # self.operations[operation.name] = operation
+                    self.operations.append(operation)
+                # else:
+                #     print('------------------start------------------------')
+                #     print(is_already_added)
+                #     print(current_variable.name)
+                #     print(operation)
+                #     print(operation.name)
+                #     print(operation.arguments)
+                #     print('-------------------end----------------------')
                 # else:
                 #     print('------------------start------------------------')
                 #     print(is_already_added)
@@ -1380,9 +1389,10 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             self.gather_operations(output)
         
         model_csdl = csdl.Model()
+        self.independent_variable_names = []
 
-        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-            # for operation in self.operations:
+        # for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+        for operation in self.operations:
             operation_name = operation.name
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
@@ -1405,8 +1415,9 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                             if input.operation is not None: # If the input is associated with an operation
                                     model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
                             else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
-                                if input not in self.user_inputs:
+                                if input not in self.user_inputs and input.name not in self.independent_variable_names:
                                     model_csdl.create_input(input.name, val=input.value)
+                                    self.independent_variable_names.append(input.name)
 
                                 model_csdl.connect(input.name, operation_name+"."+input_name) 
                     
