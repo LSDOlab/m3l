@@ -221,8 +221,10 @@ class Variable:
         self.copy_before_use = False
         if self.operation is not None:
             for argument_name, argument in self.operation.arguments.items():
-                if argument.copy_before_use:
-                    self.operation.arguments[argument_name] = argument.copy()
+                # print(argument_name, argument)
+                if argument is not None:
+                    if argument.copy_before_use:
+                        self.operation.arguments[argument_name] = argument.copy()
 
     def __getitem__(self, indices):
         import m3l
@@ -1101,8 +1103,8 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
             else:
                 if output.operation:
-                    print(output.name)
-                    print(output.operation.name)
+                    # print(output.name)
+                    # print(output.operation.name)
                     name = f'{output.operation.name}_{output.name}'
                     self.outputs[name] = output
                 else:
@@ -1308,37 +1310,39 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
 
         while stack:
             current_variable = stack.popleft()
+            if current_variable is not None:
+                if current_variable.operation is not None:
+                    # print('vars', current_variable.name, current_variable.operation)
 
-            if current_variable.operation is not None:
-                operation = current_variable.operation
-                is_already_added = self.check_if_operation_has_been_added(operation)
+                    operation = current_variable.operation
+                    is_already_added = self.check_if_operation_has_been_added(operation)
 
-                if not is_already_added:
-                # if operation.name not in self.operations:
-                    # self.operations[operation.name] = operation
-                    self.operations.append(operation)
-                # else:
-                #     print('------------------start------------------------')
-                #     print(is_already_added)
-                #     print(current_variable.name)
-                #     print(operation)
-                #     print(operation.name)
-                #     print(operation.arguments)
-                #     print('-------------------end----------------------')
-                # else:
-                #     print('------------------start------------------------')
-                #     print(is_already_added)
-                #     print(current_variable.name)
-                #     print(operation)
-                #     print(operation.name)
-                #     print(operation.arguments)
-                #     print('-------------------end----------------------')
+                    if not is_already_added:
+                    # if operation.name not in self.operations:
+                        # self.operations[operation.name] = operation
+                        self.operations.append(operation)
+                    # else:
+                    #     print('------------------start------------------------')
+                    #     print(is_already_added)
+                    #     print(current_variable.name)
+                    #     print(operation)
+                    #     print(operation.name)
+                    #     print(operation.arguments)
+                    #     print('-------------------end----------------------')
+                    # else:
+                    #     print('------------------start------------------------')
+                    #     print(is_already_added)
+                    #     print(current_variable.name)
+                    #     print(operation)
+                    #     print(operation.name)
+                    #     print(operation.arguments)
+                    #     print('-------------------end----------------------')
 
-                for input_name, input in operation.arguments.items():
-                    variable_is_already_added = self.check_if_variable_is_in_list(input, total_stack)
-                    if not variable_is_already_added:
-                        stack.append(input)
-                        total_stack.append(input)
+                    for input_name, input in operation.arguments.items():
+                        variable_is_already_added = self.check_if_variable_is_in_list(input, total_stack)
+                        if not variable_is_already_added:
+                            stack.append(input)
+                            total_stack.append(input)
 
         # self.operations.reverse()
 
@@ -1397,7 +1401,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
                 if issubclass(type(operation_csdl), csdl.Model):
-                    # print(operation_name)
+                    print(operation_name, operation)
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here-Yes?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
