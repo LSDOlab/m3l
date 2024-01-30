@@ -8,7 +8,7 @@ from python_csdl_backend import Simulator
 
 class Norm(ExplicitOperation):
     def initialize(self, kwargs):
-        self.parameters.declare('name', default='subtraction_operation', types=str)
+        self.parameters.declare('name', default='norm_operation', types=str)
         self.parameters.declare('order', types=int, default=2)
         self.parameters.declare('axes', types=tuple, default=(-1, ))
     
@@ -313,7 +313,7 @@ class Expand(ExplicitOperation):
         self.indices = self.parameters['indices']
 
     def compute(self):
-        x = self.arguments[f'x']
+        x = self.arguments[f'{self.output_name}_x']
 
         csdl_model = csdl.Model()
         x_csdl = csdl_model.declare_variable(f'x', shape=x.shape)
@@ -329,13 +329,13 @@ class Expand(ExplicitOperation):
 
         output = Variable(shape=self.new_shape, operation=self)
         self.output_name = output.name
-        self.arguments = {f'x' : x}
+        self.arguments = {f'{self.output_name}_x' : x}
 
 
         if x.value is not None:
             operation_csdl = self.compute()
             sim = Simulator(operation_csdl)
-            sim[f'x'] = x.value
+            sim[f'{self.output_name}_x'] = x.value
             sim.run()
             output.value = sim[self.output_name]
 
@@ -556,7 +556,8 @@ class Add(ExplicitOperation):
         output : Variable
             The values of the function at the mesh locations.
         '''
-        self.name = f'{x1.name}_plus_{x2.name}_operation'
+        random_name = generate_random_string()
+        self.name = f'{x1.name}_plus_{x2.name}_{random_name}_operation'
         self.parameters['name'] = self.name
         # self.x1 = x1
         # self.x2 = x2
@@ -711,7 +712,8 @@ class Division(ExplicitOperation):
         return csdl_model
     
     def evaluate(self, x1 : Variable, x2 : Variable) -> Variable:
-        self.name = f'{x1.name}_division_{x2.name}_operation'
+        random_name = generate_random_string()
+        self.name = f'{x1.name}_division_{x2.name}_{random_name}_operation'
         # Define operation arguments
         self.arguments = {f'x1' : x1, f'x2' : x2}
 
@@ -831,13 +833,18 @@ class Sum(ExplicitOperation):
         csdl_model = csdl.Model()
         x_csdl = csdl_model.declare_variable(name='x', shape=x.shape)
 
-        y = csdl.sum(x_csdl, axes=self.axes)
+        if len(x.shape) == len(self.axes):
+            y = csdl.sum(x_csdl)
+        else:
+            y = csdl.sum(x_csdl, axes=self.axes)
+
         csdl_model.register_output(name=self.output_name, var=y)
 
         return csdl_model
 
     def evaluate(self, x : Variable) -> Variable:
-        self.name = f"sum_{x.name}_along_{self.axes[0]}_operation"
+        random_name = generate_random_string()
+        self.name = f"sum_{x.name}_along_{self.axes[0]}_{random_name}_operation"
         self.arguments = {'x': x}
 
         output_shape = []
@@ -890,7 +897,8 @@ class CrossProduct(ExplicitOperation):
         return csdl_model
 
     def evaluate(self, x1 : Variable, x2 : Variable) -> Variable:
-        self.name = f"{x1.name}_cross_{x2.name}_operation"
+        random_name = generate_random_string()
+        self.name = f"{x1.name}_cross_{x2.name}_{random_name}_operation"
         self.arguments = {'x1':x1, 'x2':x2}
 
         output = Variable(shape=x1.shape, operation=self)

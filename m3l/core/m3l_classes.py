@@ -212,6 +212,7 @@ class Variable:
     upper : Union[int, float, np.ndarray, None] = None
     scaler : Union[int, float, None] = None
     equals : Union[int, float, np.ndarray, None] = None
+    description : str = None
 
     def __post_init__(self):
         if self.name is None:
