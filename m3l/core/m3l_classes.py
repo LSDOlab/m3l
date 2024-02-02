@@ -1,6 +1,6 @@
 from dataclasses import dataclass, is_dataclass, asdict, field
 from typing import Any, List
-
+import gc
 import numpy as np
 import scipy.sparse as sps
 from scipy import linalg
@@ -1478,14 +1478,20 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             operation_name = self.objective.operation.name
             model_csdl.add_objective(name=f"{operation_name}.{var_name}", scaler=scaler)
 
-        self.csdl_model = model_csdl
-        return self.csdl_model
+        csdl_model = model_csdl
+        # self.csdl_model = model_csdl
+
+        # del self.operations
+        # del self
+        # gc.collect()
+        return csdl_model
 
 
     def assemble_csdl(self) -> csdl.Model:
-        self.assemble()
-
-        return self.csdl_model
+        csdl_model = self.assemble()
+        # del self
+        # gc.collect()
+        return csdl_model #self.csdl_model
     
 
     def assemble_derivative_model(self) -> csdl.Model:
