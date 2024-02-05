@@ -6,7 +6,7 @@ from copy import deepcopy
 import gc
 from typing import Tuple
 
-def copy(x : Variable):
+def copy(x : Variable, dv_flag : bool):
     """
     Performs a deep copy of an m3l variable
     """
@@ -20,9 +20,15 @@ def copy(x : Variable):
     # scaler =  deepcopy(x.scaler)
     # equals =  deepcopy(x.equals)
 
+    if dv_flag is not None:
+        copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
+                        dv_flag=dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
+                        equals=x.equals)
+    
     copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
                         dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
                         equals=x.equals)
+    
     # copy_var = Variable(shape=x.shape, operation=x.operation, value=x.value,
     #                     dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
     #                     equals=x.equals)  # Threw an error.

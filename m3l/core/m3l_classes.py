@@ -295,12 +295,13 @@ class Variable:
         import m3l
         return m3l.reshape(self, shape)
     
-    def copy(self):
+    def copy(self, dv_flag=None):
         '''
         Returns a copy of the variable.
         '''
+        
         import m3l
-        return m3l.copy(self)
+        return m3l.copy(self, dv_flag)
 
 
 @dataclass
