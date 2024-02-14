@@ -1403,7 +1403,7 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             if issubclass(type(operation), ExplicitOperation):
                 operation_csdl = operation.compute()
                 if issubclass(type(operation_csdl), csdl.Model):
-                    print(operation_name, operation)
+                    # print(operation_name, operation)
                     model_csdl.add(submodel=operation_csdl, name=operation_name, promotes=[]) # should I suppress promotions here-Yes?
                 else:
                     raise Exception(f"{operation.name}'s compute() method is returning an invalid model type : {type(operation_csdl)}.")
