@@ -16,3 +16,8 @@ def generate_random_string(length=5):
     random_string = ''.join(random.choice(characters) for _ in range(length))
     
     return random_string
+
+
+if __name__ == '__main__':
+    for i in range(1000):
+        print(generate_random_string())

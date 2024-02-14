@@ -2,14 +2,33 @@ import csdl
 from m3l.core.m3l_classes import Variable
 from m3l.core.m3l_standard_operations import *
 from typing import Union
+from copy import deepcopy
+import gc
+from typing import Tuple
 
-def copy(x : Variable):
+def copy(x : Variable, dv_flag : bool):
     """
     Performs a deep copy of an m3l variable
     """
+    # name = deepcopy(x.name)
+    # shape = deepcopy(x.shape)
+    # operation = deepcopy(x.operation)
+    # value = deepcopy(x.value)
+    # dv_flag =  deepcopy(x.dv_flag)
+    # lower =  deepcopy(x.lower)
+    # upper =  deepcopy(x.upper)
+    # scaler =  deepcopy(x.scaler)
+    # equals =  deepcopy(x.equals)
+
+    if dv_flag is not None:
+        copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
+                        dv_flag=dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
+                        equals=x.equals)
+    
     copy_var = Variable(name=x.name, shape=x.shape, operation=x.operation, value=x.value,
                         dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
                         equals=x.equals)
+    
     # copy_var = Variable(shape=x.shape, operation=x.operation, value=x.value,
     #                     dv_flag=x.dv_flag, lower=x.lower, upper=x.upper, scaler=x.scaler,
     #                     equals=x.equals)  # Threw an error.
@@ -188,14 +207,14 @@ def sum(x:Variable, axes:tuple):
 
     return sum_operation.evaluate(x)
 
-def vstack(x1 : Variable, x2: Variable):
+def vstack(x : Tuple[Variable]):
     """
     Performs vertical stacking of two m3l variables
     """
 
     vstack_operation = VStack()
 
-    return vstack_operation.evaluate(x1=x1, x2=x2)
+    return vstack_operation.evaluate(x=x)
 
 
 def linear_combination(start : Variable, stop : Variable, num_steps:int=50, 
@@ -300,6 +319,78 @@ def rotate(points:Variable, axis_origin:Variable, axis_vector:Variable, angles:V
     return rotation_operation.evaluate(points=points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles)
 
 
+# def variable_get_item(x:Variable, indices:np.ndarray):
+#     """
+#     Performs indexing of an m3l variable
+#     """
+#     # original_shape = x.shape
+#     # if len(x.shape) > 1:
+#     #     x_flat = x.reshape((np.prod(x.shape),))
+#     # else:
+#     #     x_flat = x
+
+#     map_num_outputs = indices.shape[0]
+#     map_num_inputs = x.shape[0]
+#     map = sps.lil_matrix((map_num_outputs, map_num_inputs))
+#     for i in range(map_num_outputs):
+#         map[i, indices[i]] = 1
+
+#     map = map.tocsc()
+
+#     if len(x.shape) == 1:
+#         indexed_x = matvec(map=map, x=x.copy())
+#     else:
+#         indexed_x = matmat(map=map, x=x.copy())
+
+#     # if len(x.shape) > 1:
+#     #     index_x = index_x_flat.reshape(original_shape)
+#     # else:
+#     #     index_x = index_x_flat
+
+#     return indexed_x
+
+
+# def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
+#     """
+#     Performs indexing/assignment of an m3l variable
+#     """
+#     # original_shape = x.shape
+#     # if len(x.shape) > 1:
+#     #     x_flat = x.reshape((np.prod(x.shape),))
+#     # else:
+#     #     x_flat = x
+
+#     import m3l
+
+#     # updated component
+#     map_num_outputs = x.shape[0]
+#     map_num_inputs = indices.shape[0]
+#     map = sps.lil_matrix((map_num_outputs, map_num_inputs))
+#     for i in range(indices.shape[0]):
+#         index = indices[i]
+#         map[index, i] = 1
+#     map = map.tocsc()
+#     x_updated = matvec(map=map, x=value)
+
+#     # unchanged component
+#     data = np.ones((x.shape[0] - indices.shape[0],))
+#     unchanged_indices = np.delete(np.arange(x.shape[0]), indices)
+#     unchanged_indexing_map = sps.coo_matrix((data, (unchanged_indices, unchanged_indices)),
+#                                 shape=(x.shape[0], x.shape[0]))
+#     unchanged_indexing_map = unchanged_indexing_map.tocsc()
+#     # x_unchanged = matvec(map=unchanged_indexing_map, x=x)
+#     x_unchanged = matvec(map=unchanged_indexing_map, x=x.copy())
+
+#     new_x = x_updated + x_unchanged
+
+#     # if len(x.shape) > 1:
+#     #     index_x = index_x_flat.reshape(original_shape)
+#     # else:
+#     #     index_x = index_x_flat
+
+#     return new_x
+
+    
 def variable_get_item(x:Variable, indices:np.ndarray):
     """
     Performs indexing of an m3l variable
@@ -355,18 +446,20 @@ def variable_set_item(x:Variable, indices:np.ndarray, value:Variable):
     map = sps.coo_matrix((np.ones((map_num_inputs,)), (indices, np.arange(map_num_inputs))),
                             shape=(map_num_outputs, map_num_inputs))
     map = map.tocsc()
-    x_updated = matvec(map=map, x=value)
+    x_updated = matvec(map=map, x=value)                                                               # NOTE : high memory
 
     # unchanged component
     data = np.ones((x.shape[0] - indices.shape[0],))
     unchanged_indices = np.delete(np.arange(x.shape[0]), indices)
     unchanged_indexing_map = sps.coo_matrix((data, (unchanged_indices, unchanged_indices)),
                                 shape=(x.shape[0], x.shape[0]))
-    unchanged_indexing_map = unchanged_indexing_map.tocsc()
+    unchanged_indexing_map = unchanged_indexing_map.tocsc()                                             # NOTE : high memory
     # x_unchanged = matvec(map=unchanged_indexing_map, x=x)
-    x_unchanged = matvec(map=unchanged_indexing_map, x=x.copy())
+    x_unchanged = matvec(map=unchanged_indexing_map, x=x.copy())                                        # NOTE : high memory
 
-    new_x = x_updated + x_unchanged
+    new_x = x_updated + x_unchanged                                                                     # NOTE : high memory
+
+    # NOTE: this method gets called at least 10 times (big matrices) + smaller ones 
 
     # if len(x.shape) > 1:
     #     index_x = index_x_flat.reshape(original_shape)
