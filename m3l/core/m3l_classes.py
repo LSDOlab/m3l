@@ -1419,6 +1419,12 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                                     model_csdl.create_input(input.name, val=input.value)
                                     self.independent_variable_names.append(input.name)
 
+                                    if input.dv_flag:
+                                        lower = input.lower
+                                        upper = input.upper
+                                        scaler = input.scaler
+                                        model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+
                                 model_csdl.connect(input.name, operation_name+"."+input_name) 
                     
                                        
