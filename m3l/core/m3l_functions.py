@@ -319,6 +319,15 @@ def rotate(points:Variable, axis_origin:Variable, axis_vector:Variable, angles:V
     return rotation_operation.evaluate(points=points, axis_origin=axis_origin, axis_vector=axis_vector, angles=angles)
 
 
+def rotate_using_rotation_matrix(points:Variable, angle:Variable, cartesian_axis:str='z', units:str='degrees'):
+    """
+    Performs rotation of an m3l variable about a cartesian axis.
+    """
+    rotation_operation = RotateUsingRotationMatrix(cartesian_axis=cartesian_axis, units=units)
+
+    return rotation_operation.evaluate(points=points, angle=angle)
+
+
 # def variable_get_item(x:Variable, indices:np.ndarray):
 #     """
 #     Performs indexing of an m3l variable

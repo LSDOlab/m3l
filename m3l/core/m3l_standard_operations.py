@@ -273,7 +273,7 @@ class Dot(ExplicitOperation):
 
         return csdl_model
     
-    def compute_derivates(self):
+    def compute_derivatives(self):
         # TODO: Come back and implement this!
         x1 = self.arguments['x1']
         x2 = self.arguments['x2']
@@ -574,7 +574,7 @@ class Subtract(ExplicitOperation):
         
         return output
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         return super().compute_derivates()
 
 class Add(ExplicitOperation):
@@ -637,7 +637,7 @@ class Add(ExplicitOperation):
         
         return csdl_model
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
@@ -645,10 +645,31 @@ class Add(ExplicitOperation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+        derivatives_csdl_model : {csdl.Model}
             The csdl model or module that computes the derivatives of the model/operation outputs.
         '''
-        pass
+        derivatives_csdl_model = csdl.Model()
+
+        x1 = self.arguments['x1']
+        x2 = self.arguments['x2']
+
+        x1_csdl = derivatives_csdl_model.create_input('x1', val=x1.value)
+        x2_csdl = derivatives_csdl_model.create_input('x2', val=x2.value)
+
+        x1_size = np.prod(x1.shape)
+        x2_size = np.prod(x2.shape)
+
+        d_sum_d_x1 = np.eye(x1_size)
+        d_sum_d_x2 = np.eye(x2_size)
+
+        d_sum_d_x1_csdl = derivatives_csdl_model.create_input('identity_x1_size', val=d_sum_d_x1)
+        d_sum_d_x2_csdl = derivatives_csdl_model.create_input('identity_x2_size', val=d_sum_d_x2)
+
+        derivatives_csdl_model.register_output(f'p_{self.output_name}_p_{x1.name}', d_sum_d_x1_csdl*1)
+        derivatives_csdl_model.register_output(f'p_{self.output_name}_p_{x2.name}', d_sum_d_x2_csdl*1)
+
+        self.derivatives_csdl_model = derivatives_csdl_model
+        return derivatives_csdl_model
 
     def evaluate(self, x1:Variable, x2:Variable) -> Variable:
         '''
@@ -678,6 +699,7 @@ class Add(ExplicitOperation):
 
             output = Variable(shape=x2.shape, operation=self)
             self.output_name = output.name
+            self.output_shape = output.shape
             self.scalers[f'x1'] = x1
             self.arguments[f'x2'] = x2
             
@@ -698,6 +720,7 @@ class Add(ExplicitOperation):
 
             output = Variable(shape=x1.shape, operation=self)
             self.output_name = output.name
+            self.output_shape = output.shape
             self.scalers[f'x2'] = x2
             self.arguments[f'x1'] = x1
 
@@ -939,6 +962,26 @@ class Reshape(ExplicitOperation):
         # self.output_name = replace_periods_with_underscores( f'{x.name}_reshaped')
         operation_csdl.register_output(name=self.output_name, var=x_reshaped)
         return operation_csdl
+    
+    def compute_derivatives(self):
+        '''
+        Computes derivatives of the reshape operation.
+        '''
+        derivatives_csdl_model = csdl.Model()
+
+        x = self.arguments['x']
+        x_csdl = derivatives_csdl_model.create_input('x', val=x.value)  # only here so connections don't throw errors
+
+        x_size = np.prod(x.shape)
+
+        d_x_reshaped_d_x = np.eye(x_size)
+
+        d_x_reshaped_d_x_csdl = derivatives_csdl_model.create_input('identity_x_size', val=d_x_reshaped_d_x)
+
+        derivatives_csdl_model.register_output(f'p_{self.output_name}_p_{x.name}', d_x_reshaped_d_x_csdl*1)
+
+        self.derivatives_csdl_model = derivatives_csdl_model
+        return derivatives_csdl_model
 
     def evaluate(self, x : Variable) -> Variable:
         '''
@@ -1143,7 +1186,7 @@ class VStack(ExplicitOperation):
         # operation_csdl.register_output(name=self.output_name, var=y)
         return operation_csdl
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
@@ -1260,7 +1303,7 @@ class MatVec(ExplicitOperation):
 
         return operation_csdl
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
@@ -1268,10 +1311,30 @@ class MatVec(ExplicitOperation):
 
         Returns
         -------
-        derivatives_csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+        derivatives_csdl_model : {csdl.Model}
             The csdl model or module that computes the derivatives of the model/operation outputs.
         '''
-        pass
+        derivatives_csdl_model = csdl.Model()
+        map = self.map
+        if type(map) is np.ndarray:
+            map_csdl = derivatives_csdl_model.create_input('map', val=map)
+        elif sps.isspmatrix(map):
+            map_csdl = derivatives_csdl_model.create_input('map', val=map.toarray())    # NOTE: Consider how to keep this sparse
+        elif type(map) is Variable:
+            map_csdl = derivatives_csdl_model.create_input('map', val=map.value)
+        else:
+            raise ValueError(f"Map must be a numpy array, scipy sparse matrix, or M3L Variable. Got {type(map)}")
+        # map_csdl = derivatives_csdl_model.create_input('map', val=map)
+
+        x = self.arguments['x']
+
+        x_csdl = derivatives_csdl_model.create_input('x', shape=x.shape, val=x.value)
+
+        derivatives_csdl_model.register_output(f'p_{self.output_name}_p_{x.name}', map_csdl*1)
+
+        self.derivatives_csdl_model = derivatives_csdl_model
+
+        return derivatives_csdl_model
 
     def evaluate(self, x:Variable) -> Variable:
         '''
@@ -1298,6 +1361,7 @@ class MatVec(ExplicitOperation):
         # self.name = f'{map.name}_multiplied_with_{x.name}_operation'
         # self.name = f'{map.name}_multiplied_with_{x.name}_operation_{random_string}'
         self.name = f'{x.name}_matvec_operation_{random_string}'
+        # self.name = f'{map.name}_matvec_{x.name}_operation'  # maps can be different numpy arrays (with no names)
         # Define operation arguments
         # self.arguments = {'map' : map, 'x' : x}
         self.arguments = {'x' : x}
@@ -1351,7 +1415,7 @@ class MatMat(ExplicitOperation):
 
         return operation_csdl
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
@@ -1483,7 +1547,7 @@ class Rotate(ExplicitOperation):
 
         return operation_csdl
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
@@ -1570,6 +1634,197 @@ class Rotate(ExplicitOperation):
         return output
     
 
+class RotateUsingRotationMatrix(ExplicitOperation):
+    '''
+    Class for the rotate using rotation matrix operation.
+    '''
+    def initialize(self, kwargs):
+        self.parameters.declare('name', types=str, default='rotate_operation')
+        self.parameters.declare('cartesian_axis', types=str, default='z')
+        self.parameters.declare('units', types=str, default='degrees')
+
+    def assign_attributes(self):
+        self.units = self.parameters['units']
+        self.cartesian_axis = self.parameters['cartesian_axis']
+    
+    def compute(self):
+        '''
+        Creates the CSDL model to compute the rotation.
+
+        Returns
+        -------
+        csdl_model : {csdl.Model, lsdo_modules.ModuleCSDL}
+            The csdl model or module that computes the model/operation outputs.
+        '''
+        points = self.arguments['points']
+        angle = self.arguments['angle']
+
+        operation_csdl = csdl.Model()
+        points_csdl = operation_csdl.declare_variable(name='points', shape=points.shape, val=points.value)
+        angle_csdl = operation_csdl.declare_variable(name='angle', shape=angle.shape, val=angle.value)
+
+        rotation_matrix = operation_csdl.create_output(name='rotation_matrix', shape=(3,3), val=0.)
+        if self.units == 'degrees':
+            angle_csdl = angle_csdl/180*np.pi
+
+        one = operation_csdl.create_input(name='one', shape=(1,1), val=1.)
+
+        if self.cartesian_axis == 'x':
+            rotation_matrix[0,0] = one
+            rotation_matrix[1,1] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            rotation_matrix[1,2] = csdl.reshape(csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,1] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,2] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+        if self.cartesian_axis == 'y':
+            rotation_matrix[1,1] = one*1
+            rotation_matrix[0,0] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            rotation_matrix[0,2] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,0] = csdl.reshape(csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,2] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+        if self.cartesian_axis == 'z':
+            rotation_matrix[2,2] = one*1
+            rotation_matrix[0,0] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            rotation_matrix[0,1] = csdl.reshape(csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[1,0] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[1,1] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+
+        rotated_points = csdl.matmat(points_csdl, rotation_matrix)
+
+        operation_csdl.register_output(name=self.output_name, var=rotated_points)
+
+        return operation_csdl
+
+    def compute_derivatives(self):
+        '''
+        The derivative model should output the derivative of each output wrt each input in the format d_{output_name}_d_{input_name}.
+        A parent model will chain derivatives together. WARNING: axes will be tricky.
+
+        For this model:
+        outputs:
+            rotated_points
+        
+        inputs:
+            points
+            angle
+
+        Returns
+        -------
+        derivatives_csdl_model : {csdl.Model}
+            The csdl model or module that computes the derivatives of the model/operation outputs.
+        '''
+        points = self.arguments['points']
+        angle = self.arguments['angle']
+        derivatives_csdl_model = csdl.Model()
+
+        points_csdl = derivatives_csdl_model.declare_variable(name='points', shape=points.shape, val=points.value)
+        angle_csdl = derivatives_csdl_model.declare_variable(name='angle', shape=angle.shape, val=angle.value)
+
+        num_dimensions = 3
+
+        rotation_matrix = derivatives_csdl_model.create_output(name='rotation_matrix', shape=(num_dimensions,num_dimensions), val=0.)
+        if self.units == 'degrees':
+            angle_csdl = angle_csdl/180*np.pi
+
+        one = derivatives_csdl_model.create_input(name='one', shape=(1,1), val=1.)
+
+        if self.cartesian_axis == 'x':
+            rotation_matrix[0,0] = one*1
+            rotation_matrix[1,1] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            rotation_matrix[1,2] = csdl.reshape(csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,1] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,2] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+        if self.cartesian_axis == 'y':
+            rotation_matrix[1,1] = one*1
+            rotation_matrix[0,0] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            rotation_matrix[0,2] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,0] = csdl.reshape(csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[2,2] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+        if self.cartesian_axis == 'z':
+            rotation_matrix[2,2] = one*1
+            rotation_matrix[0,0] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            rotation_matrix[0,1] = csdl.reshape(csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[1,0] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            rotation_matrix[1,1] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+
+        # rotation matrix size = num_dim*num_dim, angle size = 1, but intermediate steps don't NEED tp be flattened.
+        d_rotation_matrix_d_angle = derivatives_csdl_model.create_output(name='d_rotation_matrix_d_angle', shape=(num_dimensions,num_dimensions), val=0.)
+        if self.cartesian_axis == 'x':
+            d_rotation_matrix_d_angle[1,1] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[1,2] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[2,1] = csdl.reshape(-csdl.cos(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[2,2] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+        if self.cartesian_axis == 'y':
+            d_rotation_matrix_d_angle[0,0] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[0,2] = csdl.reshape(-csdl.cos(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[2,0] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[2,2] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+        if self.cartesian_axis == 'z':
+            d_rotation_matrix_d_angle[0,0] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[0,1] = csdl.reshape(csdl.cos(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[1,0] = csdl.reshape(-csdl.cos(angle_csdl), new_shape=(1,1))
+            d_rotation_matrix_d_angle[1,1] = csdl.reshape(-csdl.sin(angle_csdl), new_shape=(1,1))
+
+        points_size = np.prod(points.shape)
+        # d_rotated_points_d_angle.shape = (points_size, 1) because using convention that higher-rank tensors are flattened to matrices
+        d_rotated_points_d_angle = csdl.matmat(points_csdl, d_rotation_matrix_d_angle) # + d_points_d_angle*rotation_matrix (d_points_d_angle=0)
+        d_rotated_points_d_angle = csdl.reshape(d_rotated_points_d_angle, new_shape=(points_size, 1))   # Need to flatten derivative for chain rule
+        derivatives_csdl_model.register_output(f'p_{self.output_name}_p_{angle.name}', d_rotated_points_d_angle)
+
+        # d_rotated_points_d_points = d_rotated_points_d_points*rotation_matrix + rotated_points*d_rotation_matrix_d_points
+        # -- d_rotated_points_d_points = I
+        # -- d_rotation_matrix_d_points = 0
+        d_rotated_points_d_points = csdl.transpose(rotation_matrix)
+        # d_rotated_points_d_points.shape = (num_points*num_dim, num_points*num_dim)
+        derivatives_csdl_model.register_output(f'p_{self.output_name}_p_{points.name}', d_rotated_points_d_points)
+
+        self.derivatives_csdl_model = derivatives_csdl_model
+
+        return derivatives_csdl_model
+
+
+    def evaluate(self, points:Variable, angle:Variable) -> Variable:
+        '''
+        User-facing method that the user will call to define a model evaluation.
+
+        Parameters
+        ----------
+        mesh : Variable
+            The mesh over which the function will be evaluated.
+
+        Returns
+        -------
+        function_values : Variable
+            The values of the function at the mesh locations.
+        '''
+        import m3l
+        
+        self.name = f'{points.name}_rotated_by_{angle.name}_about_{self.cartesian_axis}_operation'
+
+        # Define operation arguments
+        if len(points.shape) == 1:
+            # print("Rotating points is in vector format, so rotation is assuming 3d and reshaping into (-1,3)")
+            points = points.reshape((-1,3))
+
+        self.arguments = {'points' : points, 'angle' : angle}
+
+        # Create the M3L variables that are being output
+        
+        output_shape = points.shape
+
+        output = Variable(shape=output_shape, operation=self)
+        self.output_name = output.name
+        
+        # create csdl model for in-line evaluations
+        operation_csdl = self.compute()
+        sim = Simulator(operation_csdl)
+        sim['points'] = points.value
+        sim['angle'] = angle.value
+        sim.run()
+        output.value = sim[self.output_name]
+        
+        return output
+    
+
 class GetItem(ExplicitOperation):
     '''
     Class for the indexing operation.
@@ -1605,7 +1860,7 @@ class GetItem(ExplicitOperation):
 
         return operation_csdl
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.

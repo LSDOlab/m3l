@@ -89,7 +89,7 @@ class ExplicitOperation(Operation):
         '''
         pass
 
-    def compute_derivates(self):
+    def compute_derivatives(self):
         '''
         -- optional --
         Creates the CSDL model to compute the derivatives of the model outputs. This is only needed for dynamic analysis.
@@ -100,7 +100,7 @@ class ExplicitOperation(Operation):
         derivatives_csdl_model : {csdl.Model}
             The csdl model  that computes the derivatives of the model/operation outputs.
         '''
-        pass
+        raise NotImplementedError(f"Compute derivatives is not implemented yet for {type(self)}.")
 
     def evaluate(self) -> tuple:
         '''
@@ -1395,7 +1395,12 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
             self.gather_operations(output)
         
         model_csdl = csdl.Model()
+        # input_copies_model = csdl.Model()
+        # model_csdl.add(submodel=input_copies_model, name='input_copies', promotes=[])
+
         self.independent_variable_names = []
+        self.independent_variable_counters = {}
+        self.independent_variables = {}
 
         # for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
         for operation in self.operations:
@@ -1422,16 +1427,35 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
                                     model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
                             else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
                                 if input not in self.user_inputs and input.name not in self.independent_variable_names:
-                                    model_csdl.create_input(input.name, val=input.value)
+                                    input_csdl = model_csdl.create_input(input.name, val=input.value)
                                     self.independent_variable_names.append(input.name)
+                                    self.independent_variable_counters[input.name] = 0
+                                    self.independent_variables[input.name] = input_csdl
+
+                                    var_name = input.name
 
                                     if input.dv_flag:
                                         lower = input.lower
                                         upper = input.upper
                                         scaler = input.scaler
                                         model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+                                elif input.name in self.independent_variable_names:
+                                    self.independent_variable_counters[input.name] += 1
+                                    var_name = f'{input.name}_{self.independent_variable_counters[input.name]}'
+                                    new_input = self.independent_variables[input.name]*1
+                                    # var_name = new_input.name
+                                    model_csdl.register_output(name=var_name, var=new_input)
+                                    # input_copies_model.register_output(name=var_name, var=new_input)
+                                    # var_name = 'input_copies.' + var_name
+                                    # model_csdl.create_input(var_name, val=input.value)
 
-                                model_csdl.connect(input.name, operation_name+"."+input_name) 
+                                    # if input.dv_flag:
+                                    #     lower = input.lower
+                                    #     upper = input.upper
+                                    #     scaler = input.scaler
+                                    #     model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+
+                                model_csdl.connect(var_name, operation_name+"."+input_name) 
                     
                                        
             if issubclass(type(operation), ImplicitOperation):
@@ -1501,97 +1525,335 @@ class Model:   # Implicit (or not implicit?) model groups should be an instance 
         return csdl_model #self.csdl_model
     
 
-    def assemble_derivative_model(self) -> csdl.Model:
-        for output_name, output in self.outputs.items():
-            self.gather_operations(output)
+    # def gather_derivative_models(self):
+    #     self.derivative_models = {}  # keys are d_{output.name}_d_{input_names} where input_names is all input names concatenated, values are models
+    #     self.derivative_model_mapping = {}   # keys are d_{output.name}_d_{input.name}, values are the derivative model names
+    #     self.derivative_shapes = {} # keys are d_{output.name}_d_{input_names}, values are the shapes of the derivatives
+    #     for operation in self.operations.copy().reverse():
+    #         if issubclass(type(operation), ExplicitOperation):
+    #             derivative_model = operation.compute_derivatives()
+    #             if derivative_model is not None:
+    #                 input_names = ''
+    #                 for arg_name, arg in operation.arguments.items():
+    #                     if arg:
+    #                         input_names += arg.name + '_'
+
+    #                 self.derivative_models[f'd_{operation.output_name}_d_{input_names}'] = derivative_model
+    #                 for arg_name, arg in operation.arguments.items():
+    #                     if arg:
+    #                         self.derivative_model_mapping[f'd_{operation.output_name}_d_{arg.name}'] = f'd_{operation.output_name}_d_{input_names}'
+    #                         self.derivative_shapes[f'd_{operation.output_name}_d_{input_names}'] = operation.output_shape + arg.shape
+    #             else:
+    #                 raise Exception(f"{operation.name}'s compute_derivatives() method is returning None. Please make sure to return a valid model.")
         
+    #     return self.derivative_models
+    
+
+    # def check_of_variable_is_input_to_another_operation(self, variable_name:str):
+    #     for operation in self.operations:
+    #         for arg_name, arg in operation.arguments.items():
+    #             if arg:
+    #                 if arg.name == variable_name:
+    #                     return True
+    #     return False
+
+    # def find_model_outputs(self):
+    #     '''
+    #     Automatically detects end nodes in the graph so backtracking derivative computation knows where to start.
+    #     '''
+    #     self.output_names = []
+    #     for operation in self.operations:
+    #         if not self.check_of_variable_is_input_to_another_operation(operation.output_name):
+    #             self.output_names.append(operation.output_name)
+
+    
+    # def apply_chain_rule(self, derivative_name:str, chain_rule_model:csdl.Model, partial_derivatives:dict[str,csdl.Variable], computed_derivatives:dict[str,csdl.Variable]):
+    #     '''
+    #     Applies chain rule to compute the derivatives of the model outputs.
+    #     '''
+    #     derivative_output_name = derivative_name.split('_')[1]
+    #     derivative_input_name = derivative_name.split('_')[3]
+
+    #     this_derivative = computed_derivatives[derivative_name]
+
+    #     for derivative_name_upsteam, model_name_upstream in self.derivative_model_mapping.items():
+    #         upstream_output_name = derivative_name_upsteam.split('_')[1]
+    #         upstream_input_name = derivative_name_upsteam.split('_')[3]
+    #         if upstream_output_name != derivative_input_name:
+    #             continue
+
+    #         upstream_derivative = partial_derivatives[derivative_name_upsteam]
+    #         total_derivative = csdl.matmat(upstream_derivative, this_derivative)
+    #         total_derivative_name = f'd_{derivative_output_name}_d_{upstream_input_name}'
+        
+    #         computed_derivatives[total_derivative_name] = total_derivative
+
+    #         self.apply_chain_rule(total_derivative_name, chain_rule_model, partial_derivatives, computed_derivatives)
+
+    #     # 
+            
+    
+    def apply_backtracking_chain_rule(self, variable:Variable, total_derivative:csdl.Variable, total_output_name:str, chain_rule_model:csdl.Model, derivative_model_csdl:csdl.Model):
+        '''
+        Goes backwards through the graph to compute the derivatives of the model outputs.
+        '''
+        operation = variable.operation
+
+        if operation is None:
+            total_derivative_name = f'd_{total_output_name}_d_{variable.name}'
+            # chain_rule_model.register_output(total_derivative_name, total_derivative*1)
+            if total_derivative_name in self.derivatives:
+                self.derivatives[total_derivative_name] = self.derivatives[total_derivative_name] + total_derivative
+            else:
+                self.derivatives[total_derivative_name] = total_derivative
+            return
+
+
+        # Add forward model (needed for nonlinear operations)
+        operation_csdl = operation.compute()    # Nonlinear operations also need variable values.
+        derivative_model_csdl.add(submodel=operation_csdl, name=operation.name, promotes=[])   # Nonlinear operations also need variable values.
+
+        # Add derivative model
+        derivative_operation_csdl = operation.compute_derivatives()
+        # - Get derivative names for promotions
+        partial_derivative_names = []
+        for arg_name, arg in operation.arguments.items():
+            if arg:
+                partial_derivative_names.append(f'd_{operation.output_name}_d_{arg.name}')
+        if derivative_operation_csdl is not None:
+            # derivative_model_csdl.add(submodel=derivative_operation_csdl, name=operation.name+'_derivative', promotes=partial_derivative_names)
+            derivative_model_csdl.add(submodel=derivative_operation_csdl, name=operation.name+'_derivative', promotes=[])
+
+        # Backtrack through the graph recursively
+        for arg_name, arg in operation.arguments.items():
+            if arg:
+                partial_derivative_name = f'p_{operation.output_name}_p_{arg.name}'
+                if arg.operation is not None:
+                    # Make connection to upstream operation
+                    derivative_model_csdl.connect(arg.operation.name+"."+arg.name, operation.name+"."+arg_name)
+                    derivative_model_csdl.connect(arg.operation.name+"."+arg.name, operation.name+"_derivative."+arg_name)
+                else:
+                    # Otherwise, connect to input
+                    if arg not in self.user_inputs:
+                        # derivative_model_csdl.create_input(arg.name, val=arg.value)
+                        # self.user_inputs.append(arg)      
+                        # NOTE: When arg is repeated, we actually want to make copies of the input because CSDL doesn't allow the same input to be connected to multiple operations
+                        if arg.name in self.derivatitve_model_independent_variable_counters:
+                            # self.auto_input_counters[arg.name] += 1
+
+                            arg_upstream_name = f'{arg.name}_{self.derivatitve_model_independent_variable_counters[arg.name]}'
+                            input_copy_csdl = self.derivatitve_model_independent_variables[arg.name]*1
+                            derivative_model_csdl.register_output(arg_upstream_name, input_copy_csdl)
+                        else:
+                            # self.auto_input_counters[arg.name] = 0
+                            input_csdl = derivative_model_csdl.create_input(arg.name, val=arg.value)
+                            self.derivatitve_model_independent_variables[arg.name] = input_csdl
+                            self.derivatitve_model_independent_variable_counters[arg.name] = 0
+                            arg_upstream_name = arg.name
+
+                        # arg_upstream_name = f'{arg.name}_{self.auto_input_counters[arg.name]}'
+                        # derivative_model_csdl.create_input(arg_upstream_name, val=arg.value)
+                    else:
+                        arg_upstream_name = arg.name
+
+                    derivative_model_csdl.connect(arg_upstream_name, operation.name+"."+arg_name)
+                    derivative_model_csdl.connect(arg_upstream_name, operation.name+"_derivative."+arg_name)
+
+                # Make connection to chain rule model
+                variable_size = np.prod(variable.shape)
+                arg_size = np.prod(arg.shape)
+                partial_derivative = chain_rule_model.declare_variable(partial_derivative_name, shape=(variable_size, arg_size))
+
+                # NOTE: Shouldn't have to connect because derivative promotions aren't suppresed for chain rule model and partial derivative models
+                # derivative_model_csdl.connect(operation.name+"_derivative."+partial_derivative_name, "chain_rule_model."+partial_derivative_name)
+                derivative_model_csdl.connect(operation.name+"_derivative."+partial_derivative_name, partial_derivative_name)
+
+                # Apply chain rule
+                new_total_derivative = csdl.matmat(total_derivative, partial_derivative)
+                
+                self.apply_backtracking_chain_rule(arg, new_total_derivative, total_output_name, chain_rule_model, derivative_model_csdl)
+                    
+
+                    
+
+        
+    def assemble_derivative_model(self) -> csdl.Model:
         derivative_model_csdl = csdl.Model()
 
-        for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
-            if issubclass(type(operation), ExplicitOperation):
-                derivative_operation_csdl = operation.compute_derivatives()
-                if derivative_operation_csdl is not None:
-                    if issubclass(type(derivative_operation_csdl), csdl.Model):
-                        derivative_model_csdl.add(submodel=derivative_operation_csdl, name=operation_name, promotes=[])
-                    else:
-                        raise Exception(f"{operation.name}'s compute_derivatives() method is returning an invalid model type : {type(derivative_operation_csdl)}.")
-                else:
-                    # Maybe if compute_derivatives is None, then assume it's linear?
-                    raise Exception(f"{operation.name}'s compute_derivatives() method is returning None. Please make sure to return a valid model.")
+        chain_rule_model = csdl.Model()
+        self.derivatives = {}   # keys are d_{output_name}_d_{input_name}, values are csdl variables
 
-                if not operation.arguments and 'connect_from' in operation.parameters:
-                    for i in range(len(operation.parameters['connect_from'])):
-                        connect_from = operation.parameters['connect_from'][i]
-                        connect_to = operation.parameters['connect_to'][i]
-                        derivative_model_csdl.connect(connect_from, connect_to) 
+        derivative_model_csdl.add(submodel=chain_rule_model, name='chain_rule_model')
 
-                else:
-                    for input_name, input in operation.arguments.items():
-                        if input:
-                            if input.operation is not None: # If the input is associated with an operation
-                                    derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
-                            else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
-                                if input not in self.user_inputs:
-                                    derivative_model_csdl.create_input(input.name, val=input.value)
+        # self.auto_inputs = []
+        # self.auto_input_counters = {}
+        self.derivatitve_model_independent_variables = {}
+        self.derivatitve_model_independent_variable_counters = {}
+        for output_name, output in self.outputs.items():
+            output_size = np.prod(output.shape)
+            total_derivative = chain_rule_model.create_input(f'p_{output.name}_p_{output.name}', val=np.eye(output_size))
+            self.apply_backtracking_chain_rule(output, total_derivative*1, output.name, chain_rule_model, derivative_model_csdl)
 
-                                derivative_model_csdl.connect(input.name, operation_name+"."+input_name) 
-                    
-            # Just gonna ignore this for now
-            # if issubclass(type(operation), ImplicitOperation):
-            #     # TODO: also take input_jacobian
-            #     jacobian_csdl_model = operation.compute_derivatives()
-            #     if issubclass(type(jacobian_csdl_model), csdl.Model):
-            #     # if type(jacobian_csdl_model) is csdl.Model:
-            #         derivative_model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
-            #     elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
-            #         derivative_model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
-            #     else:
-            #         raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
-
-            #     for input_name, input in operation.arguments.items():
-            #         if input.operation is not None and input is not None:
-            #             derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
-            #     for key, value in operation.residual_partials.items():
-            #         derivative_model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
-                    
-            #         derivative_model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
-
-        # Create any user-defined inputs
-        for input in self.user_inputs:
-            var_name = input.name
-            var_val = input.value
-            var_shape = input.shape
-            dv_flag = input.dv_flag
-
-            derivative_model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
-
-            if dv_flag:
-                lower = input.lower
-                upper = input.upper
-                scaler = input.scaler
-                derivative_model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
-
-        
-        # Add constraints and objective
-        for var in self.constraints:
-            var_name = var.name
-            lower = var.lower
-            upper = var.upper
-            equals = var.equals
-            scaler = var.scaler
-            operation = var.operation
-            operation_name = operation.name
-
-            derivative_model_csdl.add_constraint(name=f"{operation_name}.{var_name}", lower=lower, upper=upper, equals=equals, scaler=scaler)
-
-        if self.objective:
-            var_name = self.objective.name
-            scaler = self.objective.scaler
-            operation = self.objective.operation
-            operation_name = self.objective.operation.name
-            derivative_model_csdl.add_objective(name=f"{operation_name}.{var_name}", scaler=scaler)
+        for derivative_name, derivative in self.derivatives.items():
+            chain_rule_model.register_output(derivative_name, derivative)
 
         return derivative_model_csdl
+    
+
+    # def assemble_derivative_model(self) -> csdl.Model:
+    #     derivative_model_csdl = csdl.Model()
+
+    #     chain_rule_model = csdl.Model() # submodel that takes partials from each submodel and applies chain rule to compute the final derivatives
+    #     partial_derivatives = {}    # list of partial derivatives that have already been computed   (string names), values are csdl variables
+    #     computed_derivatives = {}   # list of derivatives that have already been computed   (string names), values are csdl variables
+
+    #     # Add all derivative models to CSDL graph
+    #     for model_name, derivate_model in self.derivative_models.items():
+    #         derivative_model_csdl.add(submodel=derivate_model, name=model_name, promotes=[])
+
+    #     # Collect all partials into chain rule model
+    #     for derivative_name, model_name in self.derivative_model_mapping.items():
+    #         this_derivative = chain_rule_model.declare_variable(derivative_name, shape=self.derivative_shapes[model_name])
+    #         chain_rule_model.connect(model_name + '.' + derivative_name, derivative_name)
+    #         partial_derivatives[derivative_name] = this_derivative
+
+    #     # Apply chain rule
+    #     # - For the end nodes, the partials are the totals
+    #     for output_name in self.output_names:
+
+    #         for derivative_name, model_name in self.derivative_model_mapping.items():
+    #             derivative_output_name = derivative_name.split('_')[1]
+
+    #             if derivative_output_name == output_name:
+    #                 computed_derivatives[derivative_name] = partial_derivatives[derivative_name]
+
+    #                 # - Once end nodes is set, use matmat to chain rule back to the beginning
+    #                 self.apply_chain_rule(derivative_name, chain_rule_model, partial_derivatives, computed_derivatives)
+        
+
+    #     for derivative_name_upsteam, model_name_upstream in self.derivative_model_mapping.items():
+    #         upstream_output_name = derivative_name_upsteam.split('_')[1]
+    #         if upstream_output_name != input_name:
+    #             continue
+
+    #         upstream_derivative = partial_derivatives[derivative_name_upsteam]
+    #         this_derivative = partial_derivatives[derivative_name]
+    #         new_derivative = csdl.matmat(upstream_derivative, this_derivative)
+
+
+
+
+
+    #         if not operation.arguments and 'connect_from' in operation.parameters:
+    #             for i in range(len(operation.parameters['connect_from'])):
+    #                 connect_from = operation.parameters['connect_from'][i]
+    #                 connect_to = operation.parameters['connect_to'][i]
+    #                 derivative_model_csdl.connect(connect_from, connect_to) 
+
+    #         else:
+    #             for input_name, input in operation.arguments.items():
+    #                 if input:
+    #                     if input.operation is not None: # If the input is associated with an operation
+    #                             derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
+    #                     else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
+    #                         if input not in self.user_inputs:
+    #                             derivative_model_csdl.create_input(input.name, val=input.value)
+
+    #                         derivative_model_csdl.connect(input.name, operation_name+"."+input_name) 
+
+    #     return derivative_model_csdl
+
+    # def assemble_derivative_model(self) -> csdl.Model:
+    #     for output_name, output in self.outputs.items():
+    #         self.gather_operations(output)
+        
+    #     derivative_model_csdl = csdl.Model()
+
+    #     for operation_name, operation in self.operations.items():   # Already in correct order due to recursion process
+    #         if issubclass(type(operation), ExplicitOperation):
+    #             derivative_operation_csdl = operation.compute_derivatives()
+    #             if derivative_operation_csdl is not None:
+    #                 if issubclass(type(derivative_operation_csdl), csdl.Model):
+    #                     derivative_model_csdl.add(submodel=derivative_operation_csdl, name=operation_name, promotes=[])
+    #                 else:
+    #                     raise Exception(f"{operation.name}'s compute_derivatives() method is returning an invalid model type : {type(derivative_operation_csdl)}.")
+    #             else:
+    #                 # Maybe if compute_derivatives is None, then assume it's linear?
+    #                 raise Exception(f"{operation.name}'s compute_derivatives() method is returning None. Please make sure to return a valid model.")
+
+    #             if not operation.arguments and 'connect_from' in operation.parameters:
+    #                 for i in range(len(operation.parameters['connect_from'])):
+    #                     connect_from = operation.parameters['connect_from'][i]
+    #                     connect_to = operation.parameters['connect_to'][i]
+    #                     derivative_model_csdl.connect(connect_from, connect_to) 
+
+    #             else:
+    #                 for input_name, input in operation.arguments.items():
+    #                     if input:
+    #                         if input.operation is not None: # If the input is associated with an operation
+    #                                 derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name)    
+    #                         else: # if there is no input associated with an operation (i.e., top-level, user-defined inputs)
+    #                             if input not in self.user_inputs:
+    #                                 derivative_model_csdl.create_input(input.name, val=input.value)
+
+    #                             derivative_model_csdl.connect(input.name, operation_name+"."+input_name) 
+                    
+    #         # Just gonna ignore this for now
+    #         # if issubclass(type(operation), ImplicitOperation):
+    #         #     # TODO: also take input_jacobian
+    #         #     jacobian_csdl_model = operation.compute_derivatives()
+    #         #     if issubclass(type(jacobian_csdl_model), csdl.Model):
+    #         #     # if type(jacobian_csdl_model) is csdl.Model:
+    #         #         derivative_model_csdl.add(submodel=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+    #         #     elif issubclass(type(jacobian_csdl_model), ModuleCSDL):
+    #         #         derivative_model_csdl.add_module(submodule=jacobian_csdl_model, name=operation_name, promotes=[]) # should I suppress promotions here?
+    #         #     else:
+    #         #         raise Exception(f"{operation.name}'s compute() method is returning an invalid model type.")
+
+    #         #     for input_name, input in operation.arguments.items():
+    #         #         if input.operation is not None and input is not None:
+    #         #             derivative_model_csdl.connect(input.operation.name+"."+input.name, operation_name+"."+input_name) # when not promoting
+    #         #     for key, value in operation.residual_partials.items():
+    #         #         derivative_model_csdl.add(submodel=Eig(size=operation.size), name=operation.name + '_' + key + '_eig', promotes=[])
+                    
+    #         #         derivative_model_csdl.connect(operation_name + '.' + key, operation.name + '_' + key + '_eig' + '.A')
+
+    #     # Create any user-defined inputs
+    #     for input in self.user_inputs:
+    #         var_name = input.name
+    #         var_val = input.value
+    #         var_shape = input.shape
+    #         dv_flag = input.dv_flag
+
+    #         derivative_model_csdl.create_input(name=var_name, val=var_val, shape=var_shape)
+
+    #         if dv_flag:
+    #             lower = input.lower
+    #             upper = input.upper
+    #             scaler = input.scaler
+    #             derivative_model_csdl.add_design_variable(var_name, lower=lower, upper=upper, scaler=scaler)
+
+        
+    #     # Add constraints and objective
+    #     for var in self.constraints:
+    #         var_name = var.name
+    #         lower = var.lower
+    #         upper = var.upper
+    #         equals = var.equals
+    #         scaler = var.scaler
+    #         operation = var.operation
+    #         operation_name = operation.name
+
+    #         derivative_model_csdl.add_constraint(name=f"{operation_name}.{var_name}", lower=lower, upper=upper, equals=equals, scaler=scaler)
+
+    #     if self.objective:
+    #         var_name = self.objective.name
+    #         scaler = self.objective.scaler
+    #         operation = self.objective.operation
+    #         operation_name = self.objective.operation.name
+    #         derivative_model_csdl.add_objective(name=f"{operation_name}.{var_name}", scaler=scaler)
+
+    #     return derivative_model_csdl
 
     # parameters - list[(name, dynamic?, value(s))]
     def assemble_dynamic(self, initial_conditions:list, num_times:int, h_stepsize:float, parameters:list=None, integrator:str='RK4'):
